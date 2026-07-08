@@ -20,7 +20,7 @@ You need **the whole repo** (not just the one `.py` file — it imports the rest
 pipeline), Python 3.10+, and the scanner tools for your OS.
 
 ```bash
-git clone https://github.com/pseudocoder204-source/mark2
+git clone https://github.com/pseudocoder204-source/mark2.git
 cd mark2
 pip install -r requirements.txt
 ```
@@ -101,9 +101,14 @@ When it finishes it prints something like:
 [contribute] done. Findings written to contrib_my-laptop_20260708T161143Z_cfab1f25.json
 ```
 
-Send **that one `contrib_*.json` file** back to whoever asked you to run this. That's it —
-it already contains everything needed. (It also inserts a row into a local `trainset.db`
-next to the script; you don't need to send that.)
+Submit **that one `contrib_*.json` file** through this form:
+
+👉 **[Submit your contribution](https://docs.google.com/forms/d/e/1FAIpQLSfQIl3y1xTYoaWhLFSuIMLQh6TmnucyQUBe1x5bK01qFlD1zw/viewform)**
+
+That's it — the file already contains everything needed. (Note: the form's file-upload
+question requires signing in with a Google account — that's a Google Forms platform
+limit, not something specific to this project.) It also inserts a row into a local
+`trainset.db` next to the script; you don't need to send that.
 
 ---
 

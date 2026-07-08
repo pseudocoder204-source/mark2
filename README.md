@@ -75,10 +75,11 @@ ClamAV manifest, etc.).
 ## Contributing scan data
 
 This project is collecting **real, anonymized** scan findings to improve the report
-model. If you'd like to help, run one scan on a machine you own and send back a single
-small JSON file. It records only a findings summary (ports, versions, CVE IDs, hardening
-test IDs, package names) — **never** file contents, credentials, or logs, and it makes you
-review and consent before scanning.
+model. If you'd like to help, run one scan on a machine you own and submit a single
+small JSON file via this [Google Form](https://docs.google.com/forms/d/e/1FAIpQLSfQIl3y1xTYoaWhLFSuIMLQh6TmnucyQUBe1x5bK01qFlD1zw/viewform).
+It records only a findings summary (ports, versions, CVE IDs, hardening test IDs,
+package names) — **never** file contents, credentials, or logs, and it makes you review
+and consent before scanning.
 
 👉 **See [CONTRIBUTING_SCAN_DATA.md](CONTRIBUTING_SCAN_DATA.md) for the full walkthrough.**
 
