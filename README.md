@@ -92,8 +92,6 @@ and consent before scanning.
 
 ## License
 
-All rights reserved — see [LICENSE](LICENSE). This code is public for
-transparency and to support the scan-data contribution flow above; it is
-**not** open source. Cloning/running it locally to contribute a scan is fine;
-copying, redistributing, or reusing the code otherwise is not permitted
-without written permission.
+[GNU GPLv3](LICENSE). You're free to use, modify, and contribute to this
+code — any redistributed copy or derivative work must stay under GPLv3 and
+keep its source available.
