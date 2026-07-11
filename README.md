@@ -28,7 +28,8 @@ architecture.
   `apk add nmap nmap-scripts`) or nmap.org, and make sure it is on `$PATH` — or point
   `NMAP_BINARY` at it. On Windows, LAN scans additionally need
   [Npcap](https://npcap.com/#download), also installed by you.
-- An LLM backend: a local [Ollama](https://ollama.com) model (default) **or** an Anthropic API key
+- An LLM backend: a local [Ollama](https://ollama.com) model (default, see
+  [Setting up Ollama](#setting-up-ollama) below) **or** an Anthropic API key
 
 Without Nmap, mark2 still runs: the port/service, CVE-enrichment, and IoT default-credential
 stages report `{"status": "unavailable"}` and the remaining scanners (Trivy, Nuclei, Lynis,
@@ -37,6 +38,36 @@ ClamAV) proceed normally. You lose the network findings, not the run.
 ```bash
 pip install -r requirements.txt
 ```
+
+## Setting up Ollama
+
+mark2 uses two LLM stages: **triage** (reorders findings, may pull in a few extra CVE
+details) and **report** (writes the plain-English report). By default both run on
+stock `llama3.1:8b`. mark2 also publishes a fine-tuned `mark2-report` model — trained on
+the report stage's actual prompt/output contract — that produces better home-user-facing
+reports than the stock model at the same size. Triage isn't fine-tuned yet, so it stays
+on `llama3.1:8b` for now; a fine-tuned `mark2-triage` is planned as a follow-up.
+
+1. **Install Ollama** — see [ollama.com/download](https://ollama.com/download) for
+   macOS/Windows/Linux instructions. Make sure it's running (`ollama serve`, or just
+   launch the app — it starts a background service automatically on macOS/Windows).
+
+2. **Pull both models:**
+
+   ```bash
+   ollama pull llama3.1:8b                       # triage stage
+   ollama pull pseudocoder204/mark2-report        # report stage (fine-tuned)
+   ```
+
+3. **Point each stage at the right model:**
+
+   ```bash
+   export OLLAMA_MODEL=pseudocoder204/mark2-report
+   export OLLAMA_TRIAGE_MODEL=llama3.1:8b
+   ```
+
+   These default to `llama3.1:8b` for both stages if unset, so this step is only needed
+   to opt into the fine-tuned report model.
 
 ## Running a diagnostic
 
