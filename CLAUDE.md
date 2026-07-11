@@ -129,7 +129,7 @@ Graph: `scan → parse → enrich → build → END`
 State inputs: `report_file` (optional override; defaults to `/tmp/lynis-report.dat`)
 State outputs: `raw_report`, `parsed_report`, `payload`, `error`
 
-No target needed — Lynis always audits the local host. The extra `enrich` node is unique to this subgraph: it cross-references each `test_id` against the built-in `LYNIS_TEST_CATALOG` to fill in the human-readable description, remediation steps, and category tag that the machine-readable report file omits. That catalog is **original text written for this project**, not copied from Lynis (which is GPL-3.0, incompatible with this project's GPL-2.0-only) — but **71 of its 80 descriptions do not match what the upstream test ID actually checks**, and 2 IDs don't exist upstream. See the WARNING comment above the catalog; fixing it is open work. Falls back to prefix-based category inference (e.g., `SSH-7408` → "SSH") for test IDs not yet in the catalog.
+No target needed — Lynis always audits the local host. The extra `enrich` node is unique to this subgraph: it cross-references each `test_id` against the built-in `LYNIS_TEST_CATALOG` to fill in the human-readable description, remediation steps, and category tag that the machine-readable report file omits. That catalog is **original text written for this project**, not copied from Lynis (which is GPL-3.0, incompatible with this project's GPL-2.0-only). As of 2026-07-10 it was fully verified against upstream `include/tests_*` and now holds **63 entries**, down from 80: 17 IDs were removed because they can never reach `priority_findings` (15 only call `LogText`/`Display`/`AddHP`, never `ReportWarning`/`ReportSuggestion`; `LDAP-2240`/`LDAP-2244` have no `Register` call upstream at all). Since only `warning[]`/`suggestion[]` lines become findings, every `description` is phrased as **the condition detected**, not as what the test inspects — see the PROVENANCE comment above the catalog. Falls back to prefix-based category inference (e.g., `SSH-7408` → "SSH") for test IDs not in the catalog.
 
 #### `clamav_subgraph.py`
 
@@ -225,7 +225,7 @@ Wraps the subgraphs into `@tool`-decorated LangChain tools (`TOOLS` list) that `
 There is no separate `llm_backend.py` module — `_get_llm()` in `agent.py` picks a LangChain chat model directly based on `LLM_PROVIDER`, and that model is used as-is (`.invoke()` / `.bind_tools()`) for the `triage` and `report` LLM steps. No custom response-normalization layer; LangChain's own message/response types are used throughout.
 
 **`ollama`** (default, `LLM_PROVIDER=ollama`): `langchain_ollama.ChatOllama`.
-- Config: `OLLAMA_MODEL` (default: `llama3.1`), `OLLAMA_HOST` (default: `http://localhost:11434`)
+- Config: `OLLAMA_MODEL` (default: `llama3.1:8b`), `OLLAMA_HOST` (default: `http://localhost:11434`)
 
 **`claude`** (`LLM_PROVIDER=claude`): `langchain_anthropic.ChatAnthropic`. Requires `ANTHROPIC_API_KEY` set; `langchain-anthropic` (and the transitive `anthropic` SDK) come from `requirements.txt`.
 - Config: `ANTHROPIC_MODEL` (default: `claude-opus-4-8`)
@@ -288,7 +288,7 @@ The pipeline runs natively per-OS via runtime `platform.system()` dispatch — *
 |---|---|---|
 | `TARGET` | `127.0.0.1` | `agent.py`, Docker entrypoint, subgraphs |
 | `LLM_PROVIDER` | `ollama` | `agent.py` (`_get_llm`) — selects backend |
-| `OLLAMA_MODEL` | `llama3.1` | `agent.py` — `ChatOllama` |
+| `OLLAMA_MODEL` | `llama3.1:8b` | `agent.py` — `ChatOllama` |
 | `OLLAMA_HOST` | `http://host.docker.internal:11434` | `agent.py` — `ChatOllama` (Docker default) |
 | `ANTHROPIC_MODEL` | `claude-opus-4-8` | `agent.py` — `ChatAnthropic` |
 | `ANTHROPIC_API_KEY` | _(required for claude)_ | `agent.py` — `ChatAnthropic` |

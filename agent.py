@@ -39,10 +39,13 @@ Usage:
   python3 agent.py [--target IP_OR_HOST] [--json]
 
 Env vars (all optional):
-  TARGET        Scan target          (default: 127.0.0.1)
-  LLM_PROVIDER  ollama (default) or claude
-  OLLAMA_MODEL  Ollama model name    (default: llama3.1)
-  OLLAMA_HOST   Ollama base URL      (default: http://localhost:11434)
+  TARGET              Scan target          (default: 127.0.0.1)
+  LLM_PROVIDER        ollama (default) or claude
+  OLLAMA_MODEL        Ollama model name for the report node (default: llama3.1:8b)
+  OLLAMA_TRIAGE_MODEL Ollama model override for the triage node (default: OLLAMA_MODEL)
+  OLLAMA_HOST         Ollama base URL      (default: http://localhost:11434)
+  ANTHROPIC_MODEL         Claude model for the report node (default: claude-opus-4-8)
+  ANTHROPIC_TRIAGE_MODEL  Claude model override for the triage node (default: ANTHROPIC_MODEL)
   NVD_API_KEY   NVD key for faster sync
   DB_PATH       Path to vulnerability_cache.db  (default: vulnerability_cache.db)
   SCOPE_SECRET  HMAC secret for scope tokens (default: random per process)
@@ -470,8 +473,20 @@ Translate everything to everyday language instead.
 """
 
 
-def _validate_report_text(raw_text: str) -> bool:
-    return not (_CVE_RE.search(raw_text) or _CPE_RE.search(raw_text))
+def _validate_report_text(report: Dict[str, Any]) -> bool:
+    """Reject a report that leaked a raw CVE ID, CVSS score, or CPE string into a
+    narrative field. 'references' is exempt: it holds source advisory URLs the
+    model is instructed to copy verbatim, and those URLs legitimately embed CVE
+    IDs in their path (e.g. github.com/.../CVE-2019-19447) — that's not a leak,
+    it's the correct behavior of not paraphrasing a link."""
+    top_level = {k: v for k, v in report.items() if k != "findings"}
+    chunks = [json.dumps(top_level)]
+    for finding in report.get("findings", []):
+        if not isinstance(finding, dict):
+            continue
+        chunks.append(json.dumps({k: v for k, v in finding.items() if k != "references"}))
+    combined = "\n".join(chunks)
+    return not (_CVE_RE.search(combined) or _CPE_RE.search(combined))
 
 
 def _validate_report_severities(report: Dict[str, Any], table: List[Dict[str, Any]]) -> bool:
@@ -572,15 +587,14 @@ def run_report(llm, table: List[Dict[str, Any]], order: List[int]) -> Dict[str, 
         response = llm.invoke(messages)
         text = response.content
         passed = False
-        if _validate_report_text(text):
-            try:
-                report = _parse_report(text)
-            except ValueError:
-                report = None
-            if report is not None and _validate_report_severities(report, table):
-                passed = True
-                _log_training_input(ordered_facts, raw_output=text, passed_validation=True)
-                return report
+        try:
+            report = _parse_report(text)
+        except ValueError:
+            report = None
+        if report is not None and _validate_report_text(report) and _validate_report_severities(report, table):
+            passed = True
+            _log_training_input(ordered_facts, raw_output=text, passed_validation=True)
+            return report
         _log_training_input(ordered_facts, raw_output=text, passed_validation=passed)
         print(f"[report] attempt {attempt + 1} failed literal/schema/severity validation", file=sys.stderr)
         messages.append(HumanMessage(content=(
@@ -646,21 +660,34 @@ def _route(state: AgentState) -> str:
     return END if state.get("error") else "continue"
 
 
-def _get_llm():
+def _get_llm(model: Optional[str] = None):
     provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
     if provider == "ollama":
         from langchain_ollama import ChatOllama
         return ChatOllama(
-            model=os.environ.get("OLLAMA_MODEL", "llama3.1"),
+            model=model or os.environ.get("OLLAMA_MODEL", "llama3.1:8b"),
             base_url=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
         )
     if provider == "claude":
         from langchain_anthropic import ChatAnthropic
-        return ChatAnthropic(model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8"))
+        return ChatAnthropic(model=model or os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8"))
     raise ValueError(f"Unknown LLM_PROVIDER={provider!r}. Use 'ollama' or 'claude'.")
 
 
-def _build_graph(llm):
+def _get_report_llm():
+    """The report node — this is the one FinetuneGuide.txt Step 15 tunes."""
+    return _get_llm()
+
+
+def _get_triage_llm():
+    """Triage stays on the stock model unless a *_TRIAGE_MODEL override is set,
+    so existing single-model deployments are unaffected by this split."""
+    provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
+    override_env = "OLLAMA_TRIAGE_MODEL" if provider == "ollama" else "ANTHROPIC_TRIAGE_MODEL"
+    return _get_llm(os.environ.get(override_env))
+
+
+def _build_graph(triage_llm, report_llm):
     def scope_gate_node(state: AgentState) -> AgentState:
         try:
             token = resolve_scope(state["target"])
@@ -677,11 +704,11 @@ def _build_graph(llm):
         return {"findings_table": table}
 
     def triage_node(state: AgentState) -> AgentState:
-        order = run_triage(llm, state["target"], state["scope_token"], state["findings_table"])
+        order = run_triage(triage_llm, state["target"], state["scope_token"], state["findings_table"])
         return {"priority_order": order}
 
     def report_node(state: AgentState) -> AgentState:
-        report = run_report(llm, state["findings_table"], state["priority_order"])
+        report = run_report(report_llm, state["findings_table"], state["priority_order"])
         return {"report": report}
 
     graph = StateGraph(AgentState)
@@ -705,8 +732,9 @@ def _build_graph(llm):
 
 def run_agent(target: str) -> dict:
     """Drive the deterministic-spine DAG and return the parsed report dict."""
-    llm = _get_llm()
-    app = _build_graph(llm)
+    triage_llm = _get_triage_llm()
+    report_llm = _get_report_llm()
+    app = _build_graph(triage_llm, report_llm)
 
     final_state = app.invoke({"target": target})
 
@@ -786,7 +814,8 @@ def main() -> None:
             "  python3 agent.py\n"
             "  python3 agent.py --target 192.168.1.1\n"
             "  python3 agent.py --json > report.json\n\n"
-            "Env vars: TARGET, LLM_PROVIDER, OLLAMA_MODEL, OLLAMA_HOST, "
+            "Env vars: TARGET, LLM_PROVIDER, OLLAMA_MODEL, OLLAMA_TRIAGE_MODEL, "
+            "OLLAMA_HOST, ANTHROPIC_MODEL, ANTHROPIC_TRIAGE_MODEL, "
             "NVD_API_KEY, DB_PATH, SCOPE_SECRET"
         ),
     )
@@ -803,14 +832,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    provider = os.environ.get("LLM_PROVIDER", "ollama")
-    model    = (
-        os.environ.get("OLLAMA_MODEL", "llama3.1")
+    provider     = os.environ.get("LLM_PROVIDER", "ollama")
+    report_model = (
+        os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
         if provider == "ollama"
         else os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
     )
+    triage_override = os.environ.get(
+        "OLLAMA_TRIAGE_MODEL" if provider == "ollama" else "ANTHROPIC_TRIAGE_MODEL"
+    )
+    triage_model = triage_override or report_model
     print(f"[mark2] Target  : {args.target}", file=sys.stderr)
-    print(f"[mark2] Backend : {provider} / {model}", file=sys.stderr)
+    if triage_model == report_model:
+        print(f"[mark2] Backend : {provider} / {report_model}", file=sys.stderr)
+    else:
+        print(f"[mark2] Backend : {provider} / triage={triage_model} report={report_model}", file=sys.stderr)
 
     try:
         report = run_agent(args.target)

@@ -36,6 +36,18 @@ FinetuneGuide.txt
 GuideToWindowsCompatibility.txt
 LicensingPlan.txt
 commands.txt
+finetune/modal_training_issues.md
+finetune/base_model.txt
 
 # ---- Virtualenvs ----
 finetune/venv/
+
+# ---- Fine-tune build artifacts (multi-GB binaries / compiler cache — never commit) ----
+finetune/gguf_out/
+finetune/gguf_out_v2/
+unsloth_compiled_cache/
+
+# ---- Eval run outputs (regenerable, contain raw LLM generations) ----
+finetune/eval_outputs.json
+finetune/eval_scores.json
+finetune/eval_ollama_*.json

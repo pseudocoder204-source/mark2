@@ -13,8 +13,8 @@ LYNIS_TEST_CATALOG — a mapping of Lynis test IDs to human-readable description
 remediation steps, written for this project. This fills in the description/solution
 fields that the machine-readable report file omits (it stores test_id and severity only).
 
-See the WARNING above LYNIS_TEST_CATALOG: most of its descriptions do not match what
-the corresponding upstream Lynis test actually checks.
+See the PROVENANCE note above LYNIS_TEST_CATALOG: it only carries test IDs that upstream
+Lynis can actually report on, and each description states the condition that was detected.
 
 Usage — standalone:
     python3 lynis_subgraph.py
@@ -51,139 +51,112 @@ from lynis_parser import (
 # Original text, not copied from Lynis. Keep it that way: Lynis is GPL-3.0 and this
 # project is GPL-2.0-only, so pasting upstream text in here would be a license conflict.
 #
-# WARNING — UNVERIFIED MAPPINGS. As of 2026-07-09 these descriptions were compared
-# against all 43 include/tests_* files in CISOfy/lynis@master. Of 80 entries, 71
-# describe something *different* from what that test ID actually checks upstream, and
-# 2 IDs (incl. SSH-7408) do not exist upstream at all. Example: AUTH-9204 upstream is
-# "Check users with an UID of zero", not the passwordless-account check claimed below.
+# PROVENANCE — verified 2026-07-10 against all 43 include/tests_* files in
+# CISOfy/lynis@master. For each ID, the `Register --test-no ...` line and every
+# ReportWarning/ReportSuggestion call in its block were read directly.
+#
+# Only warning[] and suggestion[] lines in the report file ever reach
+# `priority_findings` (see lynis_parser.build_llm_payload_from_lynis). So a catalog
+# entry is only meaningful for a test that actually calls ReportWarning or
+# ReportSuggestion, and its `description` must state *the condition that was found*,
+# not what the test looks at — it is rendered to the user as a finding.
+#
+# 17 IDs were removed on 2026-07-10 because they can never appear in a report:
+#   - 15 register normally but only ever LogText/Display/AddHP, never
+#     ReportWarning/ReportSuggestion: AUTH-9234, AUTH-9252, AUTH-9266, AUTH-9268,
+#     CONT-8004, CONT-8102, CRYP-7930, CRYP-8002, FILE-6374, MACF-6290, MALW-3280,
+#     SHLL-6220, SHLL-6230, SSH-7440, TOOL-5102.
+#   - 2 have no `Register` call at all — they exist only as commented-out placeholder
+#     headers upstream: LDAP-2240, LDAP-2244.
+# Keeping them meant synth_findings.py fabricated host_audit findings that the real
+# pipeline can never emit (e.g. CONT-8004, a Solaris-zone inventory query, surfacing
+# as a HIGH finding on a Linux laptop).
+#
+# SSH-7408 *does* exist upstream (include/tests_ssh) — an earlier revision of this note
+# wrongly flagged it as nonexistent.
+#
 # These strings reach end users via enrich_node and seed synth_findings.py's training
 # rows, so a wrong mapping is a wrong report and a poisoned training example.
-# Do not add entries without checking the ID against upstream first.
+# Before adding an entry: confirm the ID calls ReportWarning/ReportSuggestion upstream,
+# and phrase `description` as the detected condition, in the same voice as its neighbours.
 
 LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
     # ── AUTH — Authentication ──────────────────────────────────────────────────
     "AUTH-9204": {
         "category":    "Authentication",
-        "description": "Check user accounts in /etc/passwd without a password field set",
-        "solution":    "Lock or remove password-less accounts: passwd -l <user>.",
+        "description": "An account other than root has UID 0, giving it full root-equivalent privileges",
+        "solution":    "Remove UID 0 from any account that isn't root: usermod -u <new-uid> <user>, or delete the account with userdel <user>.",
     },
     "AUTH-9208": {
         "category":    "Authentication",
-        "description": "Check default umask in /etc/login.defs",
-        "solution":    "Set UMASK to 027 or stricter in /etc/login.defs.",
+        "description": "Two or more accounts in /etc/passwd share the same UID, so the system cannot tell them apart",
+        "solution":    "Give each account a unique UID; list duplicates with: cut -d: -f3 /etc/passwd | sort | uniq -d.",
     },
     "AUTH-9218": {
         "category":    "Authentication",
-        "description": "Check for locked/expired system accounts",
-        "solution":    "Remove or lock unused system accounts with usermod -L <user>.",
+        "description": "An account with no password has a usable login shell, so it can be logged into without credentials",
+        "solution":    "Set the account's shell to /usr/sbin/nologin, or give it a password: passwd <user>.",
     },
     "AUTH-9228": {
         "category":    "Authentication",
-        "description": "Check password hashing algorithm in /etc/pam.d/ (should be SHA-512)",
-        "solution":    "Configure PAM to use SHA-512: add 'sha512' to pam_unix in /etc/pam.d/common-password.",
-    },
-    "AUTH-9234": {
-        "category":    "Authentication",
-        "description": "Check for non-unique UIDs in /etc/passwd",
-        "solution":    "Ensure each user account has a unique UID.",
-    },
-    "AUTH-9252": {
-        "category":    "Authentication",
-        "description": "Check password aging / maximum days between password changes",
-        "solution":    "Set PASS_MAX_DAYS=90 in /etc/login.defs; apply per-account with chage -M 90 <user>.",
+        "description": "The account database (/etc/passwd) failed a pwck consistency check — it has duplicate, malformed, or orphaned entries",
+        "solution":    "Review the problems with pwck -r, then run pwck to correct each one.",
     },
     "AUTH-9262": {
         "category":    "Authentication",
-        "description": "Check minimum password age to prevent immediate recycling",
-        "solution":    "Set PASS_MIN_DAYS=1 in /etc/login.defs.",
-    },
-    "AUTH-9266": {
-        "category":    "Authentication",
-        "description": "Check PAM password complexity requirements",
-        "solution":    "Enable pam_pwquality with minlen=12, dcredit=-1, ucredit=-1 in /etc/pam.d/common-password.",
-    },
-    "AUTH-9268": {
-        "category":    "Authentication",
-        "description": "Check maximum password expiry for active user accounts",
-        "solution":    "Apply per-account expiry: chage -M 90 <user> for all interactive accounts.",
+        "description": "No PAM password-strength module (pam_pwquality, pam_cracklib, or pam_passwdqc) is installed, so weak passwords are accepted",
+        "solution":    "Install a password-strength module: apt install libpam-pwquality; enable it in /etc/pam.d/common-password.",
     },
     "AUTH-9282": {
         "category":    "Authentication",
-        "description": "Check whether the sudo binary is available",
-        "solution":    "Install sudo (apt install sudo) and restrict its use via /etc/sudoers.",
+        "description": "Password-protected accounts have no password expiration date set",
+        "solution":    "Set an expiry policy on interactive accounts: chage -M 90 <user>; set PASS_MAX_DAYS in /etc/login.defs for new accounts.",
     },
     "AUTH-9286": {
         "category":    "Authentication",
-        "description": "Check sudo configuration for security weaknesses",
-        "solution":    "Use visudo to review sudoers; avoid NOPASSWD for privileged commands.",
+        "description": "Minimum and/or maximum password age is not configured in /etc/login.defs",
+        "solution":    "Set PASS_MIN_DAYS=1 and PASS_MAX_DAYS=90 in /etc/login.defs; apply to existing accounts with chage -m 1 -M 90 <user>.",
     },
     "AUTH-9288": {
         "category":    "Authentication",
-        "description": "Check LDAP authentication module configuration",
-        "solution":    "Secure LDAP connections with LDAPS or STARTTLS; do not transmit credentials in cleartext.",
+        "description": "One or more accounts have a password that has passed its expiration date and may no longer be in use",
+        "solution":    "Reset the password (passwd <user>) or remove the account if it's no longer needed: userdel <user>.",
     },
 
     # ── BOOT — Bootloader ──────────────────────────────────────────────────────
     "BOOT-5122": {
         "category":    "Boot",
-        "description": "Check for password protection on the GRUB bootloader",
-        "solution":    "Set a GRUB superuser password (grub-mkpasswd-pbkdf2) to prevent boot-time tampering.",
+        "description": "The GRUB bootloader has no password set, so anyone at the keyboard can alter boot options or boot to single-user mode",
+        "solution":    "Set a GRUB superuser password (generate one with grub-mkpasswd-pbkdf2) and rebuild the config: update-grub.",
     },
     "BOOT-5180": {
         "category":    "Boot",
-        "description": "Check systemd service unit hardening options",
-        "solution":    "Add PrivateTmp=yes, NoNewPrivileges=yes, ProtectSystem=strict to service unit files.",
-    },
-
-    # ── CONT — Containers ─────────────────────────────────────────────────────
-    "CONT-8004": {
-        "category":    "Containers",
-        "description": "Docker daemon is running; check security configuration",
-        "solution":    "Enable Docker Content Trust (DOCKER_CONTENT_TRUST=1); use rootless Docker where possible.",
-    },
-    "CONT-8102": {
-        "category":    "Containers",
-        "description": "Check for Docker containers running as root",
-        "solution":    "Add a non-root USER directive in all Dockerfiles; use --user flag at runtime.",
+        "description": "The set of services started at boot for the current runlevel could not be fully determined",
+        "solution":    "Review what starts at boot (systemctl list-unit-files --state=enabled) and disable anything unnecessary: systemctl disable <service>.",
     },
 
     # ── CRYP — Cryptography ───────────────────────────────────────────────────
     "CRYP-7902": {
         "category":    "Cryptography",
-        "description": "Check for expired SSL/TLS certificates",
-        "solution":    "Renew expired certificates immediately; automate renewal with certbot --renew.",
-    },
-    "CRYP-7930": {
-        "category":    "Cryptography",
-        "description": "Check SSL/TLS certificate expiring within 90 days",
-        "solution":    "Automate certificate renewal with an ACME client (certbot, acme.sh).",
-    },
-    "CRYP-8002": {
-        "category":    "Cryptography",
-        "description": "Check for adequate entropy source (haveged or rng-tools)",
-        "solution":    "Install haveged (apt install haveged; systemctl enable haveged) to ensure sufficient entropy.",
+        "description": "One or more SSL/TLS certificates on this device have expired or are close to expiring",
+        "solution":    "Renew the expired certificates; automate future renewals with an ACME client such as certbot.",
     },
 
     # ── FILE — File permissions ────────────────────────────────────────────────
     "FILE-6310": {
         "category":    "File Permissions",
-        "description": "Check default umask in shell configuration files (/etc/profile, /etc/bash.bashrc)",
-        "solution":    "Set 'umask 027' in /etc/profile and /etc/bash.bashrc.",
+        "description": "/home, /tmp, or /var is not on its own partition, so filling one can fill the whole root filesystem",
+        "solution":    "Give /home, /tmp, and /var dedicated partitions at your next repartition or reinstall.",
     },
     "FILE-6362": {
         "category":    "File Permissions",
-        "description": "Check sticky bit on /tmp directory",
+        "description": "/tmp does not have the sticky bit set, so any user can delete another user's files there",
         "solution":    "Set the sticky bit: chmod +t /tmp.",
-    },
-    "FILE-6374": {
-        "category":    "File Permissions",
-        "description": "Check /tmp mounted with nodev, noexec, nosuid options",
-        "solution":    "Add 'nodev,noexec,nosuid' to the /tmp entry in /etc/fstab and remount.",
     },
     "FILE-6430": {
         "category":    "File Permissions",
-        "description": "Check for disabled unused filesystem kernel modules (cramfs, hfs, jffs2, udf, etc.)",
-        "solution":    "Blacklist modules in /etc/modprobe.d/: e.g., 'install cramfs /bin/true'.",
+        "description": "Unused filesystem kernel modules (cramfs, hfs, jffs2, udf, and similar) are loadable and not disabled",
+        "solution":    "Disable them in /etc/modprobe.d/: e.g. add 'install cramfs /bin/true'.",
     },
 
     # ── FINT — File Integrity ─────────────────────────────────────────────────
@@ -194,8 +167,8 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
     },
     "FINT-4402": {
         "category":    "File Integrity",
-        "description": "Check AIDE configuration for strong hash algorithms (SHA-256/SHA-512)",
-        "solution":    "Configure AIDE rules to use sha256 or sha512; remove md5 from the hash list.",
+        "description": "AIDE is configured to create checksums with a weak hash algorithm rather than SHA-256 or SHA-512",
+        "solution":    "Change the AIDE rules to use sha256 or sha512 and drop md5, then rebuild the baseline: aide --init.",
     },
 
     # ── FIRE — Firewall ───────────────────────────────────────────────────────
@@ -213,13 +186,13 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
     # ── HOME — Home directories ───────────────────────────────────────────────
     "HOME-9304": {
         "category":    "Home Directories",
-        "description": "Check home directory permissions (should be 750 or stricter)",
-        "solution":    "Restrict home directories: chmod 750 /home/<user> for each interactive account.",
+        "description": "One or more home directories have permissions loose enough for other users to read them",
+        "solution":    "Tighten each interactive account's home directory: chmod 750 /home/<user>.",
     },
     "HOME-9310": {
         "category":    "Home Directories",
-        "description": "Check for history file symlink attacks (e.g., .bash_history → /dev/null)",
-        "solution":    "Remove symlinks from history files; set HISTFILE=/dev/null only in approved admin configs.",
+        "description": "A shell history file is not a regular file (it may be a symlink), which can indicate tampering or an attempt to discard history",
+        "solution":    "Inspect the history file and replace it with a regular file owned by that account; only set HISTFILE=/dev/null in configs you intend to.",
     },
 
     # ── HRDN — Hardening ──────────────────────────────────────────────────────
@@ -254,13 +227,13 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
     # ── INSE — Insecure services ──────────────────────────────────────────────
     "INSE-8016": {
         "category":    "Insecure Services",
-        "description": "Insecure service (telnet, rsh, rlogin) detected via inetd/xinetd",
-        "solution":    "Remove insecure service entries from /etc/inetd.conf; disable inetd or replace with SSH.",
+        "description": "Telnet is enabled as a service through inetd/xinetd — it sends passwords in cleartext",
+        "solution":    "Remove the telnet entry from the inetd/xinetd configuration and use SSH instead.",
     },
     "INSE-8300": {
         "category":    "Insecure Services",
-        "description": "rsh (remote shell) service is installed",
-        "solution":    "Remove rsh-server: apt purge rsh-server; use SSH for all remote access.",
+        "description": "The rsh client package is installed — rsh transmits credentials in cleartext",
+        "solution":    "Remove it if unused: apt purge rsh-client; use the ssh client instead.",
     },
     "INSE-8322": {
         "category":    "Insecure Services",
@@ -287,18 +260,6 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
                        "kernel.dmesg_restrict=1; run sysctl --system.",
     },
 
-    # ── LDAP — LDAP ───────────────────────────────────────────────────────────
-    "LDAP-2240": {
-        "category":    "LDAP",
-        "description": "LDAP rootdn password is stored in plaintext in slapd.conf",
-        "solution":    "Hash the password with slappasswd and replace the plaintext value in slapd.conf.",
-    },
-    "LDAP-2244": {
-        "category":    "LDAP",
-        "description": "LDAP is not configured to use TLS/LDAPS",
-        "solution":    "Configure STARTTLS or LDAPS; set 'security tls=1' in slapd.conf.",
-    },
-
     # ── LOGG — Logging ────────────────────────────────────────────────────────
     "LOGG-2154": {
         "category":    "Logging",
@@ -322,11 +283,6 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
         "description": "SELinux is not enabled or not in enforcing mode",
         "solution":    "Set SELINUX=enforcing in /etc/selinux/config and relabel the filesystem (touch /.autorelabel).",
     },
-    "MACF-6290": {
-        "category":    "MAC Frameworks",
-        "description": "No mandatory access control (MAC) framework is active on this system",
-        "solution":    "Install and enforce AppArmor (Debian/Ubuntu) or SELinux (RHEL/CentOS) for kernel-level access control.",
-    },
 
     # ── MAIL — Mail ───────────────────────────────────────────────────────────
     "MAIL-8818": {
@@ -341,11 +297,6 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
     },
 
     # ── MALW — Malware ────────────────────────────────────────────────────────
-    "MALW-3280": {
-        "category":    "Malware",
-        "description": "No anti-virus or anti-malware scanner is installed",
-        "solution":    "Install ClamAV: apt install clamav clamav-daemon; enable freshclam for daily signature updates.",
-    },
     "MALW-3286": {
         "category":    "Malware",
         "description": "freshclam anti-virus signature update daemon is not running",
@@ -446,18 +397,6 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
         "solution":    "Restrict crontab: chmod 600 /etc/crontab; ensure /etc/cron.d/ files are owned by root:root.",
     },
 
-    # ── SHLL — Shell ─────────────────────────────────────────────────────────
-    "SHLL-6220": {
-        "category":    "Shell",
-        "description": "No idle session timeout (TMOUT) configured — sessions remain open indefinitely",
-        "solution":    "Add 'readonly TMOUT=900; export TMOUT' to /etc/profile.d/tmout.sh.",
-    },
-    "SHLL-6230": {
-        "category":    "Shell",
-        "description": "Default shell umask is not set to a restrictive value",
-        "solution":    "Set 'umask 027' in /etc/profile and /etc/bash.bashrc.",
-    },
-
     # ── SNMP — SNMP ───────────────────────────────────────────────────────────
     "SNMP-3306": {
         "category":    "SNMP",
@@ -474,11 +413,6 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
                        "PasswordAuthentication no, MaxAuthTries 3, "
                        "ClientAliveInterval 300, ClientAliveCountMax 2, "
                        "AllowTcpForwarding no, X11Forwarding no; reload: systemctl reload sshd.",
-    },
-    "SSH-7440": {
-        "category":    "SSH",
-        "description": "SSH does not restrict access with AllowUsers or AllowGroups",
-        "solution":    "Add 'AllowUsers <user1> <user2>' or 'AllowGroups sshusers' to /etc/ssh/sshd_config; reload sshd.",
     },
 
     # ── STRG — Storage ────────────────────────────────────────────────────────
@@ -506,11 +440,6 @@ LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
     },
 
     # ── TOOL — Tooling / IDS ──────────────────────────────────────────────────
-    "TOOL-5102": {
-        "category":    "Tooling",
-        "description": "Fail2ban intrusion prevention is not installed",
-        "solution":    "Install Fail2ban: apt install fail2ban; configure /etc/fail2ban/jail.local for SSH and web services.",
-    },
     "TOOL-5190": {
         "category":    "Tooling",
         "description": "No IDS/IPS (Snort, Suricata, OSSEC/Wazuh) installed",
