@@ -42,7 +42,7 @@ image = (
         "xformers==0.0.35",
         "numpy==2.5.1",
     )
-    .add_local_file(str(_REPO_ROOT / "eval.jsonl"), "/root/eval.jsonl", copy=True)
+    .add_local_file(str(_REPO_ROOT / "finetune" / "eval.jsonl"), "/root/eval.jsonl", copy=True)
 )
 
 BASE_MODEL = "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"

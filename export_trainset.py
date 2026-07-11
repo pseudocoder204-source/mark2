@@ -111,7 +111,7 @@ def _write_jsonl(rows, path: Path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", default="trainset.db")
-    parser.add_argument("--out-dir", default=".")
+    parser.add_argument("--out-dir", default="finetune")
     parser.add_argument("--eval-frac", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()

@@ -25,7 +25,7 @@ image = (
         "accelerate==1.14.0",
         "numpy==2.5.1",
     )
-    .add_local_file(str(_REPO_ROOT / "eval.jsonl"), "/root/eval.jsonl", copy=True)
+    .add_local_file(str(_REPO_ROOT / "finetune" / "eval.jsonl"), "/root/eval.jsonl", copy=True)
 )
 
 MERGED_DIR = "/output/report-3b-gguf"
