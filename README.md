@@ -35,6 +35,40 @@ Without Nmap, mark2 still runs: the port/service, CVE-enrichment, and IoT defaul
 stages report `{"status": "unavailable"}` and the remaining scanners (Trivy, Nuclei, Lynis,
 ClamAV) proceed normally. You lose the network findings, not the run.
 
+## Quick install
+
+An installer script provisions the scanner tools, the Python dependencies, and the Ollama
+models in one shot. It **installs**, never bundles — every tool comes from your OS package
+manager or the tool's own upstream release (nmap from your distro/`winget`, Trivy and Nuclei
+from their official installers), so mark2 redistributes nothing. It's idempotent: anything
+already present is skipped.
+
+**Linux / macOS:**
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # recommended
+./install.sh
+```
+
+**Windows** (PowerShell):
+
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1   # recommended
+.\install.ps1
+```
+
+The script prints a summary of what it installed and what you must still do yourself. It
+deliberately does **not** touch three things:
+
+- **Npcap** (Windows LAN scans) — its license forbids redistribution, so `install.ps1` only
+  detects it and links to [npcap.com](https://npcap.com/#download); you install it yourself.
+- **Ollama itself** — install it from [ollama.com/download](https://ollama.com/download) first
+  (the script pulls the *models* but not the runtime). Re-run the script after installing it.
+- **The CVE cache** (~3.2 GB) — download it from Releases (see [The CVE cache](#the-cve-cache)).
+
+Prefer to do it by hand? Everything the script does is spelled out below — install the
+scanners ([Install the scanners](CONTRIBUTING_SCAN_DATA.md#install-the-scanners)), then:
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -47,6 +81,10 @@ stock `llama3.1:8b`. mark2 also publishes a fine-tuned `mark2-report` model — 
 the report stage's actual prompt/output contract — that produces better home-user-facing
 reports than the stock model at the same size. Triage isn't fine-tuned yet, so it stays
 on `llama3.1:8b` for now; a fine-tuned `mark2-triage` is planned as a follow-up.
+
+> If you ran the [Quick install](#quick-install) script with Ollama already installed, both
+> models below are already pulled — this section is the manual walkthrough and the
+> per-stage model reference.
 
 1. **Install Ollama** — see [ollama.com/download](https://ollama.com/download) for
    macOS/Windows/Linux instructions. Make sure it's running (`ollama serve`, or just
