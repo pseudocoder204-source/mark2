@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-from display_graph import display_graph
+# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
 from lynis_parser import (
     build_llm_payload_from_lynis,
@@ -552,7 +552,7 @@ def _infer_category(test_id: str) -> str:
     """Derive a human-readable category from the test_id prefix when not in catalog."""
     _PREFIX_MAP = {
         "AUTH": "Authentication", "BOOT": "Boot",    "CONT": "Containers",
-        "CRYP": "Cryptography",  "DBS":  "Databases","DNS":  "DNS",
+        "CRYP": "Cryptography",  "DBS":  "Databases","DEB":  "Packages", "DNS":  "DNS",
         "FILE": "File Permissions", "FINT": "File Integrity", "FIRE": "Firewall",
         "HOME": "Home Directories", "HRDN": "Hardening", "HTTP": "Web Servers",
         "INSE": "Insecure Services", "KRB":  "Kerberos", "KRNL": "Kernel",
@@ -631,7 +631,7 @@ def run_pipeline(report_file: str = "/tmp/lynis-report.dat") -> Dict[str, Any]:
     Raises RuntimeError if any stage fails.
     """
     app = build_lynis_subgraph()
-    display_graph(app)
+    # display_graph(app)
     final_state = app.invoke({
         "report_file":   report_file,
         "raw_report":    "",

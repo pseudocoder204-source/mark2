@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-from display_graph import display_graph
+# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
 from clamav_parser import (
     DEFAULT_SCAN_TIMEOUT,
@@ -166,7 +166,7 @@ def run_pipeline(
     Raises RuntimeError if any stage fails.
     """
     app = build_clamav_subgraph()
-    display_graph(app)
+    # display_graph(app)
     final_state = app.invoke({
         "scan_paths":       scan_paths,
         "scan_timeout":     scan_timeout,

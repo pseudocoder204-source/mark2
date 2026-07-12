@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only
+import glob
 import subprocess
 import json
 import os
 import sys
+import time
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from bin_resolver import resolve as _resolve_bin
 
@@ -14,14 +16,77 @@ from bin_resolver import resolve as _resolve_bin
 # production hang with no prior bound — every worker must fail bounded, not hang.
 DEFAULT_TRIVY_TIMEOUT = 300
 
-def run_local_trivy_scan(timeout: int = DEFAULT_TRIVY_TIMEOUT) -> List[Dict[str, Any]]:
+# Pseudo-filesystems and noisy mount points that contain no real packages/lockfiles —
+# walking them wastes most of a scan's time without ever surfacing a finding.
+_SKIP_DIRS = [
+    "/proc", "/sys", "/dev", "/run", "/snap",
+    "/mnt", "/media", "/lost+found",
+    "/var/lib/docker", "/var/lib/containerd",
+]
+
+# Directory name patterns that are enormous but never contain OS packages or
+# lockfiles worth re-parsing (dependency trees already reported via their
+# top-level lockfile). Trivy's --skip-dirs accepts glob patterns.
+_SKIP_DIR_PATTERNS = [
+    "**/.cache", "**/.git", "**/node_modules", "**/__pycache__",
+    "**/.venv", "**/venv", "**/.tox", "**/.mypy_cache", "**/.pytest_cache",
+]
+
+# How old (hours) Trivy's local vulnerability DB can be before we bother
+# triggering a re-download — mirrors clamav_parser.py's freshclam skip so a
+# scan doesn't pay a network fetch on every single invocation.
+_TRIVY_DB_MAX_AGE_HOURS = 24
+
+
+def _trivy_cache_dir() -> str:
+    return os.environ.get("TRIVY_CACHE_DIR") or os.path.expanduser("~/.cache/trivy")
+
+
+def _trivy_db_is_fresh(max_age_hours: int = _TRIVY_DB_MAX_AGE_HOURS) -> bool:
+    db_files = glob.glob(os.path.join(_trivy_cache_dir(), "db", "*"))
+    if not db_files:
+        return False
+    newest_mtime = max(os.path.getmtime(p) for p in db_files)
+    return (time.time() - newest_mtime) / 3600 < max_age_hours
+
+
+def run_local_trivy_scan(
+    timeout: int = DEFAULT_TRIVY_TIMEOUT,
+    scan_target: str = "/",
+    skip_dirs: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     """
     Kicks off a local open-source Trivy vulnerability audit (like a checklist) via the terminal
     and streams the results directly into system memory as JSON payload.
+
+    Scoped like clamav_parser.py's clamscan invocation: noisy/irrelevant
+    directories are excluded via --skip-dirs, the scan is restricted to the
+    vuln scanner only (skipping secret/misconfig/license passes that don't
+    matter for this pipeline), and a fresh local DB skips the network
+    re-download — all in service of finishing inside `timeout` instead of a
+    full unscoped "/" walk blowing past it.
     """
     print(f"[*] Launching localized open-source Trivy vulnerability scanner...")
 
-    command = [_resolve_bin("trivy"), "fs", "/", "--format", "json", "--quiet"]
+    exclude_flags: List[str] = []
+    for d in _SKIP_DIRS:
+        exclude_flags += ["--skip-dirs", d]
+    for pattern in (skip_dirs or _SKIP_DIR_PATTERNS):
+        exclude_flags += ["--skip-dirs", pattern]
+
+    command = (
+        [_resolve_bin("trivy"), "fs", scan_target,
+         "--format", "json", "--quiet",
+         "--scanners", "vuln",
+         # Trivy's own internal timeout — leaves a few seconds of margin so
+         # trivy can flush partial JSON before the subprocess-level timeout
+         # below would otherwise SIGKILL it mid-write.
+         "--timeout", f"{max(timeout - 10, 10)}s"]
+        + exclude_flags
+    )
+    if _trivy_db_is_fresh():
+        print("[*] Trivy vulnerability DB is up-to-date — skipping DB update.", file=sys.stderr)
+        command.append("--skip-db-update")
 
     try:
         result = subprocess.run(

@@ -2,11 +2,15 @@
 """
 nmap_subgraph.py — LangGraph subgraph edition of the nmap pipeline.
 
-All five stages from nmap_parser.py are each modelled as a LangGraph node:
+The DB init/sync stage is a separate graph from the scan/parse/enrich stage, so a
+caller that invokes several nmap-backed scans back-to-back (e.g. agent.py's worker
+spine, which calls scan_network then scan_iot_defaults) can sync the NVD cache once
+instead of once per call:
 
-    [init_db_node] → [sync_db_node] → [scan_node] → [parse_node] → [enrich_node] → END
-          ↓                 ↓               ↓               ↓               ↓
-         END               END             END             END             END   (on error)
+    build_nmap_sync_subgraph():  [init_db_node] → [sync_db_node] → END
+    build_nmap_subgraph():       [scan_node] → [parse_node] → [enrich_node] → END
+                                        ↓              ↓               ↓
+                                       END            END             END   (on error)
 
 Usage — standalone:
     python3 nmap_subgraph.py [target]
@@ -17,6 +21,8 @@ Usage — as a subgraph node inside a parent graph:
 
     The parent state must expose at least: target, scan_type, db_path, nvd_api_key.
     On completion the subgraph writes back: raw_xml, findings, hosts, payload, error.
+    The DB must already be initialised/synced — run build_nmap_sync_subgraph() (or
+    call run_db_sync()) first.
 
     scan_type accepts: "version_detect" (default), "quick_syn", "host_discovery"
     (-sn, MAC-keyed host inventory — no CVE enrichment), "iot_default_creds"
@@ -33,7 +39,7 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-from display_graph import display_graph
+# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
 from nmap_parser import (
     ScanType,
@@ -205,12 +211,36 @@ def _route(state: NmapSubgraphState) -> str:
 
 # ── Graph factory ─────────────────────────────────────────────────────────────
 
+def build_nmap_sync_subgraph():
+    """Build and compile the DB init + NVD sync subgraph: init_db → sync_db → END.
+
+    Split out from build_nmap_subgraph() so callers that make several nmap-backed
+    calls in a row (e.g. agent.py's worker spine, which runs scan_network then
+    scan_iot_defaults) can sync the NVD cache once via run_db_sync() rather than
+    once per call.
+    """
+    graph = StateGraph(NmapSubgraphState)
+
+    graph.add_node("init_db", _init_db_node)
+    graph.add_node("sync_db", _sync_db_node)
+
+    graph.set_entry_point("init_db")
+
+    graph.add_conditional_edges("init_db", _route, {"ok": "sync_db", "error": END})
+    graph.add_conditional_edges("sync_db", _route, {"ok": END,       "error": END})
+
+    return graph.compile()
+
+
 def build_nmap_subgraph():
-    """Build and compile the nmap parser subgraph.
+    """Build and compile the nmap scan/parse/enrich subgraph: scan → parse → enrich → END.
 
     Returns a compiled CompiledStateGraph that can be:
       • Invoked directly:  app.invoke({...})  / app.stream({...})
       • Embedded as a node in a parent graph via parent.add_node("nmap", build_nmap_subgraph())
+
+    Assumes the DB at db_path is already initialised and synced — run
+    build_nmap_sync_subgraph() (or run_db_sync()) first.
 
     When embedded, the parent state must include the keys:
         target, scan_type, db_path
@@ -219,47 +249,70 @@ def build_nmap_subgraph():
     """
     graph = StateGraph(NmapSubgraphState)
 
-    graph.add_node("init_db", _init_db_node)
-    graph.add_node("sync_db", _sync_db_node)
     graph.add_node("scan",    _scan_node)
     graph.add_node("parse",   _parse_node)
     graph.add_node("enrich",  _enrich_node)
 
-    graph.set_entry_point("init_db")
+    graph.set_entry_point("scan")
 
     # Each node routes to END on error so the caller gets partial state with
     # the error message rather than an unhandled exception bubbling up.
-    graph.add_conditional_edges("init_db", _route, {"ok": "sync_db", "error": END})
-    graph.add_conditional_edges("sync_db", _route, {"ok": "scan",    "error": END})
     graph.add_conditional_edges("scan",    _route, {"ok": "parse",   "error": END})
     graph.add_conditional_edges("parse",   _route, {"ok": "enrich",  "error": END})
     graph.add_conditional_edges("enrich",  _route, {"ok": END,       "error": END})
 
     return graph.compile()
 
-# ── Convenience wrapper ───────────────────────────────────────────────────────
+# ── Convenience wrappers ──────────────────────────────────────────────────────
+
+def run_db_sync(db_path: str = "vulnerability_cache.db", nvd_api_key: str = "") -> None:
+    """Run init_db → sync_db once. Raises RuntimeError if either stage fails.
+
+    Call this once per process before a batch of run_pipeline(..., skip_sync=True)
+    calls, instead of letting each one re-sync the NVD cache.
+    """
+    app = build_nmap_sync_subgraph()
+    final_state = app.invoke({
+        "db_path":     db_path,
+        "nvd_api_key": nvd_api_key,
+        "db_ready":    False,
+        "error":       None,
+    })
+    if final_state.get("error"):
+        raise RuntimeError(f"nmap DB sync failed: {final_state['error']}")
+
 
 def run_pipeline(
     target:      str,
     scan_type:   str = "version_detect",
     db_path:     str = "vulnerability_cache.db",
     nvd_api_key: str = "",
+    skip_sync:   bool = False,
 ) -> List[Dict[str, Any]]:
-    """Run the full init_db → sync_db → scan → parse → enrich pipeline.
+    """Run the nmap scan → parse → enrich pipeline.
 
-    Mirrors the original nmap_parser.py interface so this module can be swapped
-    in wherever enrich_and_condense_findings output is expected.
+    By default also runs init_db → sync_db first, so this remains a complete,
+    self-contained call for standalone/manual use — mirrors the original
+    nmap_parser.py interface so this module can be swapped in wherever
+    enrich_and_condense_findings output is expected.
+
+    Pass skip_sync=True when the caller has already synced the DB itself this
+    process (via run_db_sync()) — e.g. agent.py's worker spine syncs once before
+    calling scan_network/scan_iot_defaults, rather than syncing on every call.
 
     Raises RuntimeError if any stage fails.
     """
+    if not skip_sync:
+        run_db_sync(db_path=db_path, nvd_api_key=nvd_api_key)
+
     app = build_nmap_subgraph()
-    display_graph(app)
+    # display_graph(app)
     final_state = app.invoke({
         "target":      target,
         "scan_type":   scan_type,
         "db_path":     db_path,
         "nvd_api_key": nvd_api_key,
-        "db_ready":    False,
+        "db_ready":    True,
         "raw_xml":     "",
         "findings":    [],
         "hosts":       [],

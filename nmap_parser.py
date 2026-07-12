@@ -10,6 +10,7 @@ import json
 import sqlite3
 import time
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from bin_resolver import resolve as _resolve_bin
 import re
@@ -32,38 +33,78 @@ def _synchronized(func):
 # STAGE 1: PORT SCANNING
 class ScanType(Enum):
     # Enum locks args to hardcoded values, preventing command injection via the target parameter
-    VERSION_DETECT     = ["-sV", "--version-light"]
-    QUICK_SYN          = ["-sS", "-F", "--open"]   # requires NET_RAW capability (root/Docker)
+    # --stats-every emits periodic "About X% done" progress lines on stderr — run_nmap
+    # parses these to surface live progress instead of going silent until completion.
+    # -T4 + --min-rate tune nmap's default conservative T3 timing/adaptive send-rate for
+    # trusted local/home-network scanning, where WAN-safe stealth pacing just adds wait
+    # time (see the "why is version detect slow" investigation) — not appropriate if this
+    # pipeline is ever pointed at a target outside the operator's own network.
+    VERSION_DETECT     = ["-sV", "--version-light", "-T4", "--min-rate", "100", "--stats-every", "5s"]
+    QUICK_SYN          = ["-sS", "-F", "--open", "-T4", "--min-rate", "100", "--stats-every", "5s"]   # requires NET_RAW capability (root/Docker)
     # Host-discovery only (no port scan) — answers "who's on my network" and gives a
     # MAC-keyed inventory anchor for drift detection across repeat scans.
-    HOST_DISCOVERY     = ["-sn"]
+    HOST_DISCOVERY     = ["-sn", "-T4", "--stats-every", "5s"]
     # Home-network IoT/default-credential exposure check: router/camera/admin-panel
     # factory passwords and open UPnP. Same XML shape as VERSION_DETECT, plus <script> output.
-    IOT_DEFAULT_CREDS  = ["-sV", "--version-light", "--script", "http-default-accounts,upnp-info,snmp-info"]
+    IOT_DEFAULT_CREDS  = ["-sV", "--version-light", "-T4", "--min-rate", "100", "--script", "http-default-accounts,upnp-info,snmp-info", "--stats-every", "5s"]
 
 # Default hard timeout (seconds) for the nmap subprocess. A hung nmap process was a
 # latent production hang with no prior bound — every worker must fail bounded, not hang.
 DEFAULT_NMAP_TIMEOUT = 300
 
+# Matches nmap's periodic progress lines, e.g. "Service scan Timing: About 40.00% done; ETC: ..."
+_STATS_DONE_RE = re.compile(r"About\s+([\d.]+)%\s+done")
+
+
 def run_nmap(target: str, scan_type: ScanType, timeout: int = DEFAULT_NMAP_TIMEOUT) -> str:
     # -oX - streams XML directly to stdout instead of writing a file
     command = [_resolve_bin("nmap"), "-oX", "-", *scan_type.value, target]
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            check=True,
-            timeout=timeout,
         )
-        return result.stdout
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"Nmap scan of {target!r} exceeded the {timeout}s timeout and was killed.")
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Nmap failed execution: {e.stderr.strip()}")
     except FileNotFoundError:
         raise RuntimeError("Nmap binary not found. Please install Nmap and add it to your PATH.")
+
+    stdout_chunks: List[str] = []
+    stderr_chunks: List[str] = []
+
+    def _drain_stdout():
+        for line in proc.stdout:
+            stdout_chunks.append(line)
+
+    def _drain_stderr():
+        for line in proc.stderr:
+            stderr_chunks.append(line)
+            match = _STATS_DONE_RE.search(line)
+            if match:
+                print(f"[nmap] {float(match.group(1)):.0f}% done...", file=sys.stderr)
+
+    # Read stdout/stderr in separate threads while waiting — --stats-every writes to
+    # stderr as the scan progresses, and a single-threaded read-after-wait would only
+    # see it once the process (and the pipe buffer) has already finished.
+    t_out = threading.Thread(target=_drain_stdout, daemon=True)
+    t_err = threading.Thread(target=_drain_stderr, daemon=True)
+    t_out.start()
+    t_err.start()
+
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise RuntimeError(f"Nmap scan of {target!r} exceeded the {timeout}s timeout and was killed.")
+    finally:
+        t_out.join(timeout=2)
+        t_err.join(timeout=2)
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"Nmap failed execution: {''.join(stderr_chunks).strip()}")
+
+    return "".join(stdout_chunks)
 
 # STAGE 2: DATA STRUCTURES & XML PARSING
 @dataclass

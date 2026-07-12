@@ -1,0 +1,455 @@
+[
+  {
+    "index": 0,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "critical": 0.3333333333333333,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    }
+  },
+  {
+    "index": 1,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    }
+  },
+  {
+    "index": 2,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "critical": -0.3333333333333333,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "critical": -0.3333333333333333,
+      "low": 1.0
+    }
+  },
+  {
+    "index": 3,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "critical": 0.3333333333333333,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "critical": 0.3333333333333333,
+      "low": 1.0
+    }
+  },
+  {
+    "index": 4,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "high": 1.0,
+      "low": 1.0
+    }
+  },
+  {
+    "index": 5,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "high": 0.3333333333333333,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "high": 0.3333333333333333,
+      "low": 1.0
+    }
+  },
+  {
+    "index": 6,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "high": -1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "high": 0.3333333333333333,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "high": 0.3333333333333333,
+      "low": 1.0
+    }
+  },
+  {
+    "index": 7,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "high": 1.0,
+      "low": 1.0
+    }
+  },
+  {
+    "index": 8,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": -1.0,
+      "high": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "high": -0.3333333333333333
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    }
+  },
+  {
+    "index": 9,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    }
+  },
+  {
+    "index": 10,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    }
+  },
+  {
+    "index": 11,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 12,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 13,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 14,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 15,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 16,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 17,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "high": 0.3333333333333333
+    },
+    "stock_tau": {
+      "high": 0.3333333333333333
+    },
+    "fallback_tau": {
+      "high": 0.3333333333333333
+    }
+  },
+  {
+    "index": 18,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    }
+  },
+  {
+    "index": 19,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0
+    }
+  },
+  {
+    "index": 20,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    }
+  },
+  {
+    "index": 21,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    }
+  },
+  {
+    "index": 22,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    }
+  },
+  {
+    "index": 23,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    }
+  },
+  {
+    "index": 24,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 0.3333333333333333
+    },
+    "fallback_tau": {
+      "low": 1.0
+    }
+  },
+  {
+    "index": 25,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    }
+  },
+  {
+    "index": 26,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 27,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 28,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 29,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 30,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 31,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 32,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 33,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 34,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {}
+  },
+  {
+    "index": 35,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    }
+  }
+]

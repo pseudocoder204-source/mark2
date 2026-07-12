@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-from display_graph import display_graph
+# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
 from trivy_parser import (
     build_llm_payload_from_trivy,
@@ -109,7 +109,7 @@ def run_pipeline() -> Dict[str, Any]:
     Raises RuntimeError if any stage fails.
     """
     app = build_trivy_subgraph()
-    display_graph(app)
+    # display_graph(app)
     final_state = app.invoke({
         "raw_results": [],
         "payload":     {},

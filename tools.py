@@ -27,6 +27,19 @@ def _is_windows() -> bool:
     return platform.system() == "Windows"
 
 
+def sync_nmap_db() -> None:
+    """Run the nmap subgraph's DB init + NVD sync once.
+
+    Not an @tool — this is called explicitly by agent.py's worker spine, once,
+    before scan_network/scan_iot_defaults/discover_hosts run, so those calls can
+    pass skip_sync=True instead of each re-syncing the NVD cache. Raises
+    RuntimeError if the DB is unavailable/sync fails; callers should treat that
+    the same as an "unavailable" nmap tool result.
+    """
+    from nmap_subgraph import run_db_sync
+    run_db_sync(db_path=_DB_PATH)
+
+
 @tool
 def scan_network(target: str) -> str:
     """Scan a target IP address or hostname for open network ports and running
@@ -37,6 +50,21 @@ def scan_network(target: str) -> str:
     from nmap_subgraph import run_pipeline as nmap_run_pipeline
     try:
         payload = nmap_run_pipeline(target, db_path=_DB_PATH)
+    except RuntimeError as exc:
+        return json.dumps({
+            "status": "unavailable",
+            "reason": str(exc),
+        })
+    return json.dumps(payload)
+
+
+def _scan_network_no_sync(target: str) -> str:
+    """Fast-path used by agent.py's spine: assumes sync_nmap_db() already ran."""
+    if not re.match(r"^[\w.\-/]+$", target):
+        raise ValueError(f"Invalid target format: {target!r}")
+    from nmap_subgraph import run_pipeline as nmap_run_pipeline
+    try:
+        payload = nmap_run_pipeline(target, db_path=_DB_PATH, skip_sync=True)
     except RuntimeError as exc:
         return json.dumps({
             "status": "unavailable",
@@ -76,6 +104,21 @@ def scan_iot_defaults(target: str) -> str:
     from nmap_subgraph import run_pipeline as nmap_run_pipeline
     try:
         payload = nmap_run_pipeline(target, scan_type="iot_default_creds", db_path=_DB_PATH)
+    except RuntimeError as exc:
+        return json.dumps({
+            "status": "unavailable",
+            "reason": str(exc),
+        })
+    return json.dumps(payload)
+
+
+def _scan_iot_defaults_no_sync(target: str) -> str:
+    """Fast-path used by agent.py's spine: assumes sync_nmap_db() already ran."""
+    if not re.match(r"^[\w.\-/]+$", target):
+        raise ValueError(f"Invalid target format: {target!r}")
+    from nmap_subgraph import run_pipeline as nmap_run_pipeline
+    try:
+        payload = nmap_run_pipeline(target, scan_type="iot_default_creds", db_path=_DB_PATH, skip_sync=True)
     except RuntimeError as exc:
         return json.dumps({
             "status": "unavailable",

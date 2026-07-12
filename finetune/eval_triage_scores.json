@@ -1,0 +1,887 @@
+[
+  {
+    "index": 0,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "critical": 0.3333333333333333,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 3,
+        "pred_total": 3,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 1,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 2
+      },
+      "stock": {
+        "tp": 1,
+        "pred_total": 1,
+        "gold_total": 2
+      }
+    }
+  },
+  {
+    "index": 2,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "critical": 0.3333333333333333,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "critical": -0.3333333333333333,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "critical": -0.3333333333333333,
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 3,
+        "pred_total": 3,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 3,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "critical": 0.6666666666666666,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "critical": 0.3333333333333333,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "critical": 0.3333333333333333,
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 3,
+        "pred_total": 3,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 1,
+        "pred_total": 2,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 4,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 2
+      },
+      "stock": {
+        "tp": 1,
+        "pred_total": 1,
+        "gold_total": 2
+      }
+    }
+  },
+  {
+    "index": 5,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "high": 0.6666666666666666,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "high": 0.3333333333333333,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "high": 0.3333333333333333,
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 3,
+        "pred_total": 3,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 6,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "high": -1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "high": 0.3333333333333333,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "high": 0.3333333333333333,
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 3,
+        "pred_total": 3,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 2,
+        "pred_total": 2,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 7,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "stock_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "high": 1.0,
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 2,
+        "pred_total": 2,
+        "gold_total": 2
+      },
+      "stock": {
+        "tp": 1,
+        "pred_total": 1,
+        "gold_total": 2
+      }
+    }
+  },
+  {
+    "index": 8,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": -0.3333333333333333,
+      "high": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "high": -0.3333333333333333
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 3,
+        "pred_total": 3,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 9,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 2,
+        "pred_total": 2,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 10,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 3,
+        "pred_total": 3,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 1,
+        "pred_total": 1,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 11,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 12,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 13,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 14,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 15,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 16,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 17,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "high": 0.3333333333333333
+    },
+    "stock_tau": {
+      "high": 0.3333333333333333
+    },
+    "fallback_tau": {
+      "high": 0.3333333333333333
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 2
+      },
+      "stock": {
+        "tp": 1,
+        "pred_total": 1,
+        "gold_total": 2
+      }
+    }
+  },
+  {
+    "index": 18,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "high": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 3,
+        "pred_total": 3,
+        "gold_total": 3
+      },
+      "stock": {
+        "tp": 2,
+        "pred_total": 2,
+        "gold_total": 3
+      }
+    }
+  },
+  {
+    "index": 19,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {
+      "critical": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 2
+      },
+      "stock": {
+        "tp": 1,
+        "pred_total": 1,
+        "gold_total": 2
+      }
+    }
+  },
+  {
+    "index": 20,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 21,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 22,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 2,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 23,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 24,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 25,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {
+      "low": 1.0
+    },
+    "stock_tau": {
+      "low": 1.0
+    },
+    "fallback_tau": {
+      "low": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 26,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 27,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 2,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 28,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 29,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 30,
+    "tuned_passed": true,
+    "stock_passed": false,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 31,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 32,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 33,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 2,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 34,
+    "tuned_passed": true,
+    "stock_passed": true,
+    "tuned_tau": {},
+    "stock_tau": {},
+    "fallback_tau": {},
+    "escalation": {
+      "tuned": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 0
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 1,
+        "gold_total": 0
+      }
+    }
+  },
+  {
+    "index": 35,
+    "tuned_passed": false,
+    "stock_passed": false,
+    "tuned_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "stock_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "fallback_tau": {
+      "critical": 1.0,
+      "medium": 1.0
+    },
+    "escalation": {
+      "tuned": {
+        "tp": 2,
+        "pred_total": 2,
+        "gold_total": 2
+      },
+      "stock": {
+        "tp": 0,
+        "pred_total": 0,
+        "gold_total": 2
+      }
+    }
+  }
+]

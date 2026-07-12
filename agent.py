@@ -8,7 +8,7 @@ spine and the LLM used only as a bounded side-car — never as the thing choosin
 to scan.
 
     scope_gate → scan_network → scan_iot_defaults → scan_filesystem → audit_host
-        → scan_malware → scan_web → enrich → triage (LLM, refs-only)
+        → scan_malware → scan_web → enrich → triage (deterministic, refs-only)
         → report (LLM, refs-only) → END
 
 Load-bearing rules enforced by code, not by prompt wording:
@@ -23,9 +23,10 @@ Load-bearing rules enforced by code, not by prompt wording:
     {"status": "error", ...} instead of crashing the whole run.
   - ENRICH builds a single findings table with a stable integer `ref` per finding.
     This table is the one and only source of facts from here on.
-  - TRIAGE is an LLM call that may only reorder findings *within* their deterministic
-    severity tier and may request CVE-detail escalations by `ref` (validated against
-    the table, budget-limited). It cannot invent a finding or promote severity.
+  - TRIAGE is pure Python (`_fallback_order`): findings are ordered by severity tier
+    then CVSS, descending. FinetuneGuideTriage.txt Phase 5 tried three tuned models
+    (3B multi-turn, 3B single-shot, 7B multi-turn) and none beat this deterministic
+    ordering on held-out eval, so no LLM is called here — it was pure overhead.
   - REPORT is an LLM call that turns the ordered findings table into plain language.
     Its output is regex-validated to contain no CVE ID / CVSS number / CPE string; on
     a second consecutive validation failure the report is rendered by a pure-Python
@@ -42,10 +43,8 @@ Env vars (all optional):
   TARGET              Scan target          (default: 127.0.0.1)
   LLM_PROVIDER        ollama (default) or claude
   OLLAMA_MODEL        Ollama model name for the report node (default: llama3.1:8b)
-  OLLAMA_TRIAGE_MODEL Ollama model override for the triage node (default: OLLAMA_MODEL)
   OLLAMA_HOST         Ollama base URL      (default: http://localhost:11434)
-  ANTHROPIC_MODEL         Claude model for the report node (default: claude-opus-4-8)
-  ANTHROPIC_TRIAGE_MODEL  Claude model override for the triage node (default: ANTHROPIC_MODEL)
+  ANTHROPIC_MODEL     Claude model for the report node (default: claude-opus-4-8)
   NVD_API_KEY   NVD key for faster sync
   DB_PATH       Path to vulnerability_cache.db  (default: vulnerability_cache.db)
   SCOPE_SECRET  HMAC secret for scope tokens (default: random per process)
@@ -64,7 +63,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
-from display_graph import display_graph
+# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 import tools
 
 # ── Scope gate (pure Python, no LLM) ──────────────────────────────────────────
@@ -109,11 +108,11 @@ def resolve_scope(target: str) -> str:
 # Fixed order, never chosen by the model. Each entry: (result_key, needs_target, fn).
 
 def _call_network(target: str) -> Any:
-    return json.loads(tools.scan_network.func(target))
+    return json.loads(tools._scan_network_no_sync(target))
 
 
 def _call_iot_defaults(target: str) -> Any:
-    return json.loads(tools.scan_iot_defaults.func(target))
+    return json.loads(tools._scan_iot_defaults_no_sync(target))
 
 
 def _call_filesystem(_target: str) -> Any:
@@ -131,8 +130,30 @@ def _call_malware(_target: str) -> Any:
     return tools.get_last_malware_result()
 
 
-def _call_web(target: str) -> Any:
-    return json.loads(tools.scan_web.func(target))
+def _pick_web_scheme(results: Dict[str, Any], target: str) -> str:
+    """Choose the scheme scan_web hits based on ports nmap already found open, instead
+    of always forcing http:// (nuclei_subgraph's own default). Home routers commonly
+    serve their admin UI on 443-only with a self-signed cert; forcing http:// against
+    those hits a dead/empty port 80 and silently reports zero findings. Only ever
+    scans ONE scheme — not both — so this doesn't add a second nuclei pass and
+    doesn't change scan_web's runtime, just which port it points at.
+    """
+    open_ports: set = set()
+    for source in ("network", "iot_defaults"):
+        data = results.get(source)
+        if isinstance(data, list):
+            for rec in data:
+                if isinstance(rec, dict) and rec.get("port") is not None:
+                    open_ports.add(rec["port"])
+    if 443 in open_ports:
+        return f"https://{target}"
+    if 80 in open_ports:
+        return f"http://{target}"
+    return target  # no port data available — let nuclei_subgraph's own http:// default apply
+
+
+def _call_web(target: str, results: Dict[str, Any]) -> Any:
+    return json.loads(tools.scan_web.func(_pick_web_scheme(results, target)))
 
 
 _WORKERS = [
@@ -147,12 +168,22 @@ _WORKERS = [
 
 def run_scan_phase(target: str, scope_token: str) -> Dict[str, Any]:
     results: Dict[str, Any] = {}
+
+    # Sync the NVD cache once here rather than letting scan_network and
+    # scan_iot_defaults each re-sync it inside their own nmap_subgraph.run_pipeline()
+    # call — see the "no_sync" worker fns above, which assume this already ran.
+    try:
+        print("[scan]  syncing NVD vulnerability cache...", file=sys.stderr)
+        tools.sync_nmap_db()
+    except Exception as exc:
+        print(f"[scan]  NVD sync failed, continuing with existing cache: {exc}", file=sys.stderr)
+
     for name, needs_target, fn in _WORKERS:
         try:
             if needs_target and not verify_scope_token(target, scope_token):
                 raise ScopeError("scope token invalid or expired before worker ran")
-            print(f"[scan]  running {name}...", file=sys.stderr)
-            results[name] = fn(target)
+            print(f"[scan]  running {name} scan...", file=sys.stderr)
+            results[name] = fn(target, results) if name == "web" else fn(target)
         except Exception as exc:
             print(f"[scan]  {name} failed: {exc}", file=sys.stderr)
             results[name] = {"status": "error", "reason": str(exc)}
@@ -248,9 +279,31 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     fs = results.get("filesystem")
     if isinstance(fs, dict):
+        # Trivy's own payload builder (trivy_parser.build_llm_payload_from_trivy) lists
+        # one entry per CVE, not per package — a package with 8 distinct CVEs produces 8
+        # near-identical "affected" rows in the report. Dedup by package+version like
+        # network dedups by port above: keep one row, merge every CVE into cve_ids, and
+        # let the worst CVE's severity/description win.
+        seen_packages: Dict[str, int] = {}  # "package|version" -> index into table
         for v in fs.get("priority_findings", []) or []:
             sev = str(v.get("severity", "")).lower()
             cvss = {"critical": 9.5, "high": 7.5, "medium": 5.0}.get(sev, 3.0)
+            cve_id = v.get("cve_id")
+            fixed_version = v.get("fixed_version")
+            pkg_key = f"{v.get('package')}|{v.get('installed_version', '')}"
+
+            if pkg_key in seen_packages:
+                existing = table[seen_packages[pkg_key]]
+                if cve_id and cve_id not in existing["cve_ids"]:
+                    existing["cve_ids"].append(cve_id)
+                if fixed_version and fixed_version not in existing["remediation_refs"]:
+                    existing["remediation_refs"].append(fixed_version)
+                if cvss > existing["cvss"]:
+                    existing["cvss"] = cvss
+                    existing["severity"] = _severity_bucket(cvss)
+                    existing["description"] = v.get("description", "") or existing["description"]
+                continue
+
             table.append({
                 "ref": ref,
                 "source": "filesystem",
@@ -258,11 +311,12 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "cpe": None,
                 "cvss": cvss,
                 "severity": _severity_bucket(cvss),
-                "cve_ids": [v.get("cve_id")] if v.get("cve_id") else [],
+                "cve_ids": [cve_id] if cve_id else [],
                 "description": v.get("description", ""),
-                "remediation_refs": [v.get("fixed_version")] if v.get("fixed_version") else [],
+                "remediation_refs": [fixed_version] if fixed_version else [],
                 "script_findings": None,
             })
+            seen_packages[pkg_key] = len(table) - 1
             ref += 1
 
     host = results.get("host_audit")
@@ -326,29 +380,10 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
     return table
 
 
-# ── Triage: LLM reorders within tier + bounded, gated escalation ─────────────
+# ── Triage: deterministic severity-tier + CVSS ordering ──────────────────────
 
-_MAX_ESCALATIONS = 3
 _CVE_RE = re.compile(r"CVE-\d{4}-\d+", re.IGNORECASE)
 _CPE_RE = re.compile(r"cpe:2\.3:", re.IGNORECASE)
-
-_TRIAGE_SYSTEM_PROMPT = """You are a triage assistant. You are given a JSON array of \
-already-verified security findings, each with a stable integer "ref" and a "severity" \
-tier already computed for you (critical/high/medium/low).
-
-Your job: decide the priority order to present these findings in. You may reorder \
-findings only WITHIN the same severity tier — never move a finding to a different \
-tier, and never drop or invent a ref.
-
-If you need more CVE detail on a specific finding to judge its priority, call the \
-lookup_cves tool with that finding's exact "cpe" value (only present on network/iot \
-findings) — you have at most {budget} such calls.
-
-When you are done, respond with ONLY this JSON object, nothing else:
-{{"priority_order": [<ref>, <ref>, ...]}}
-
-Never include a CVE ID, a CVSS number, or a CPE string anywhere in your response — \
-refer to findings only by their ref number."""
 
 
 def _fallback_order(table: List[Dict[str, Any]]) -> List[int]:
@@ -356,83 +391,16 @@ def _fallback_order(table: List[Dict[str, Any]]) -> List[int]:
     return [f["ref"] for f in ordered]
 
 
-def _validate_triage_order(raw_text: str, table: List[Dict[str, Any]]) -> Optional[List[int]]:
-    if _CVE_RE.search(raw_text) or _CPE_RE.search(raw_text):
-        print("[triage] rejected — response contained a raw CVE/CPE literal", file=sys.stderr)
-        return None
-    try:
-        text = raw_text.strip()
-        brace = text.find("{")
-        if brace > 0:
-            text = text[brace:]
-        parsed = json.loads(text)
-        order = [int(r) for r in parsed["priority_order"]]
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-        print("[triage] rejected — response was not valid {\"priority_order\": [...]}", file=sys.stderr)
-        return None
+def run_triage(table: List[Dict[str, Any]]) -> List[int]:
+    """Deterministic severity-tier + CVSS ordering — no LLM call.
 
-    valid_refs = {f["ref"] for f in table}
-    if not set(order).issubset(valid_refs):
-        print("[triage] rejected — order referenced a ref not in the findings table", file=sys.stderr)
-        return None
-
-    tier_by_ref = {f["ref"]: _TIER_RANK.get(f["severity"], 0) for f in table}
-    tiers_seen = [tier_by_ref[r] for r in order]
-    if tiers_seen != sorted(tiers_seen, reverse=True):
-        print("[triage] rejected — order violated severity-tier monotonicity", file=sys.stderr)
-        return None
-
-    # Any findings the model omitted are appended in fallback order, never dropped.
-    missing = [r for r in _fallback_order(table) if r not in order]
-    return order + missing
-
-
-def run_triage(llm, target: str, scope_token: str, table: List[Dict[str, Any]]) -> List[int]:
-    if not table:
-        return []
-
-    lookup_tool = tools.lookup_cves
-    llm_with_tool = llm.bind_tools([lookup_tool])
-
-    compact = [{k: v for k, v in f.items() if k not in ("script_findings",)} for f in table]
-    messages = [
-        SystemMessage(content=_TRIAGE_SYSTEM_PROMPT.format(budget=_MAX_ESCALATIONS)),
-        HumanMessage(content=json.dumps(compact)),
-    ]
-
-    valid_cpes = {f["cpe"] for f in table if f.get("cpe")}
-    escalations_used = 0
-
-    for _ in range(_MAX_ESCALATIONS + 1):
-        response = llm_with_tool.invoke(messages)
-        messages.append(response)
-        if not getattr(response, "tool_calls", None):
-            break
-        for tc in response.tool_calls:
-            cpe = tc["args"].get("cpe")
-            if escalations_used >= _MAX_ESCALATIONS or cpe not in valid_cpes:
-                # Escalation budget exhausted, or the requested CPE isn't in the
-                # deterministic table — deny it before it ever executes.
-                result = json.dumps({"error": "escalation denied: budget exhausted or cpe out of scope"})
-            else:
-                escalations_used += 1
-                result = lookup_tool.func(cpe)
-            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
-
-    final_text = messages[-1].content if hasattr(messages[-1], "content") else ""
-    if not isinstance(final_text, str) or not final_text.strip():
-        # Model ended on a tool call/empty message — ask once more for the final JSON.
-        forced = llm.invoke(messages + [HumanMessage(content=(
-            "Stop calling tools. Respond with ONLY the JSON object "
-            '{"priority_order": [...]} now.'
-        ))])
-        final_text = forced.content
-
-    order = _validate_triage_order(final_text, table)
-    if order is None:
-        print("[triage] falling back to deterministic severity-tier ordering", file=sys.stderr)
-        order = _fallback_order(table)
-    return order
+    FinetuneGuideTriage.txt Phase 5 (2026-07-12) evaluated three tuned models
+    (3B multi-turn, 3B single-shot, 7B multi-turn) against this fallback and none
+    beat it on held-out intra-tier Kendall-tau. Verdict: DO NOT SHIP; keep
+    _fallback_order. Since it never lost, calling an LLM here was pure latency
+    and cost with no upside — so triage no longer calls one at all.
+    """
+    return _fallback_order(table)
 
 
 # ── Report: LLM turns ordered facts into plain language, no invented literals ─
@@ -547,15 +515,25 @@ def _deterministic_report(table: List[Dict[str, Any]], order: List[int]) -> Dict
     }
 
 
-def run_report(llm, table: List[Dict[str, Any]], order: List[int]) -> Dict[str, Any]:
-    if not table:
-        return {"overall_risk": "low", "summary": "No findings were reported by any scanner.", "findings": [], "good_news": ["Nothing suspicious was found."]}
+# mark2-report (finetune/train.jsonl) was trained on inputs of at most 14 facts —
+# real hosts with a vulnerable OS + several open services + IoT script findings
+# routinely blow past that (e.g. 32 facts / 21 findings), which is well outside
+# anything the eval set exercised (it's all 0-finding "low" cases). Past the
+# training distribution the model stops copying and starts inventing content
+# (e.g. a fabricated "Model XYZ" finding), tripping _validate_report_severities.
+# Chunking keeps every LLM call in-distribution; this is a stopgap until a second
+# wave of higher-count training examples lets the model be retrained on the full
+# range (see notes/FinetuneGuide.txt).
+_REPORT_CHUNK_SIZE = 10
 
-    by_ref = {f["ref"]: f for f in table}
-    ordered_facts = [by_ref[r] for r in order if r in by_ref]
+
+def _run_report_chunk(llm, chunk_table: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Run the report LLM on one chunk (<= _REPORT_CHUNK_SIZE facts), 2 attempts,
+    then fall back to the deterministic template for just this chunk."""
+    order = [f["ref"] for f in chunk_table]
     messages = [
         SystemMessage(content=_REPORT_SYSTEM_PROMPT),
-        HumanMessage(content=json.dumps(ordered_facts)),
+        HumanMessage(content=json.dumps(chunk_table)),
     ]
 
     for attempt in range(2):
@@ -565,9 +543,9 @@ def run_report(llm, table: List[Dict[str, Any]], order: List[int]) -> Dict[str, 
             report = _parse_report(text)
         except ValueError:
             report = None
-        if report is not None and _validate_report_text(report) and _validate_report_severities(report, table):
+        if report is not None and _validate_report_text(report) and _validate_report_severities(report, chunk_table):
             return report
-        print(f"[report] attempt {attempt + 1} failed literal/schema/severity validation", file=sys.stderr)
+        print(f"[report] chunk attempt {attempt + 1} failed literal/schema/severity validation", file=sys.stderr)
         messages.append(HumanMessage(content=(
             "Your previous response was rejected: it either contained a raw CVE ID, "
             "CVSS number, or CPE string; was invalid JSON; or changed a finding's "
@@ -576,8 +554,33 @@ def run_report(llm, table: List[Dict[str, Any]], order: List[int]) -> Dict[str, 
             "every 'severity' exactly as given in the input."
         )))
 
-    print("[report] falling back to deterministic template report", file=sys.stderr)
-    return _deterministic_report(table, order)
+    print("[report] chunk falling back to deterministic template report", file=sys.stderr)
+    return _deterministic_report(chunk_table, order)
+
+
+def run_report(llm, table: List[Dict[str, Any]], order: List[int]) -> Dict[str, Any]:
+    if not table:
+        return {"overall_risk": "low", "summary": "No findings were reported by any scanner.", "findings": [], "good_news": ["Nothing suspicious was found."]}
+
+    by_ref = {f["ref"]: f for f in table}
+    ordered_facts = [by_ref[r] for r in order if r in by_ref]
+    chunks = [ordered_facts[i:i + _REPORT_CHUNK_SIZE] for i in range(0, len(ordered_facts), _REPORT_CHUNK_SIZE)]
+
+    findings: List[Dict[str, Any]] = []
+    good_news: List[str] = []
+    worst_tier = 0
+    for i, chunk in enumerate(chunks):
+        print(f"[report] generating chunk {i + 1}/{len(chunks)} ({len(chunk)} finding(s))...", file=sys.stderr)
+        chunk_report = _run_report_chunk(llm, chunk)
+        findings.extend(chunk_report.get("findings", []))
+        good_news.extend(chunk_report.get("good_news", []))
+        worst_tier = max(worst_tier, _TIER_RANK.get(str(chunk_report.get("overall_risk", "low")).lower(), 0))
+
+    # Stitched deterministically rather than with one more LLM call over the
+    # already-generated chunk summaries — keeps the merge itself failure-proof.
+    overall = {3: "critical", 2: "high", 1: "medium", 0: "low"}[worst_tier]
+    summary = f"The scan found {len(findings)} issue(s) that need attention out of {len(table)} item(s) reviewed."
+    return {"overall_risk": overall, "summary": summary, "findings": findings, "good_news": good_news}
 
 
 def _parse_report(raw: str) -> dict:
@@ -650,15 +653,7 @@ def _get_report_llm():
     return _get_llm()
 
 
-def _get_triage_llm():
-    """Triage stays on the stock model unless a *_TRIAGE_MODEL override is set,
-    so existing single-model deployments are unaffected by this split."""
-    provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
-    override_env = "OLLAMA_TRIAGE_MODEL" if provider == "ollama" else "ANTHROPIC_TRIAGE_MODEL"
-    return _get_llm(os.environ.get(override_env))
-
-
-def _build_graph(triage_llm, report_llm):
+def _build_graph(report_llm):
     def scope_gate_node(state: AgentState) -> AgentState:
         try:
             token = resolve_scope(state["target"])
@@ -675,7 +670,7 @@ def _build_graph(triage_llm, report_llm):
         return {"findings_table": table}
 
     def triage_node(state: AgentState) -> AgentState:
-        order = run_triage(triage_llm, state["target"], state["scope_token"], state["findings_table"])
+        order = run_triage(state["findings_table"])
         return {"priority_order": order}
 
     def report_node(state: AgentState) -> AgentState:
@@ -697,15 +692,14 @@ def _build_graph(triage_llm, report_llm):
     graph.add_edge("report", END)
 
     app = graph.compile()
-    display_graph(app)
+    # display_graph(app)
     return app
 
 
 def run_agent(target: str) -> dict:
     """Drive the deterministic-spine DAG and return the parsed report dict."""
-    triage_llm = _get_triage_llm()
     report_llm = _get_report_llm()
-    app = _build_graph(triage_llm, report_llm)
+    app = _build_graph(report_llm)
 
     final_state = app.invoke({"target": target})
 
@@ -785,9 +779,8 @@ def main() -> None:
             "  python3 agent.py\n"
             "  python3 agent.py --target 192.168.1.1\n"
             "  python3 agent.py --json > report.json\n\n"
-            "Env vars: TARGET, LLM_PROVIDER, OLLAMA_MODEL, OLLAMA_TRIAGE_MODEL, "
-            "OLLAMA_HOST, ANTHROPIC_MODEL, ANTHROPIC_TRIAGE_MODEL, "
-            "NVD_API_KEY, DB_PATH, SCOPE_SECRET"
+            "Env vars: TARGET, LLM_PROVIDER, OLLAMA_MODEL, OLLAMA_HOST, "
+            "ANTHROPIC_MODEL, NVD_API_KEY, DB_PATH, SCOPE_SECRET"
         ),
     )
     parser.add_argument(
@@ -809,15 +802,8 @@ def main() -> None:
         if provider == "ollama"
         else os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
     )
-    triage_override = os.environ.get(
-        "OLLAMA_TRIAGE_MODEL" if provider == "ollama" else "ANTHROPIC_TRIAGE_MODEL"
-    )
-    triage_model = triage_override or report_model
     print(f"[mark2] Target  : {args.target}", file=sys.stderr)
-    if triage_model == report_model:
-        print(f"[mark2] Backend : {provider} / {report_model}", file=sys.stderr)
-    else:
-        print(f"[mark2] Backend : {provider} / triage={triage_model} report={report_model}", file=sys.stderr)
+    print(f"[mark2] Backend : {provider} / {report_model}", file=sys.stderr)
 
     try:
         report = run_agent(args.target)

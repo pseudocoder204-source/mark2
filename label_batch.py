@@ -10,6 +10,7 @@ Usage: python3 label_batch.py <lo> <hi> [--relabel]
 """
 
 import json
+import re
 import sqlite3
 import sys
 
@@ -345,6 +346,19 @@ def _summarize_overall(n_issues: int, worst_tier_rank: int, total_ok: int) -> st
     return lead
 
 
+# Shared severity->urgency clause, appended after a source-specific "why" sentence
+# rather than standing in for it alone — severity alone was the whole reason both
+# Trivy and Lynis translations used to collapse to 2-3 near-identical why_it_matters
+# strings project-wide (verified: 296 host_audit training rows had only 2 distinct
+# why_it_matters values, 205 filesystem rows had only 3).
+_SEVERITY_URGENCY_CLAUSE = {
+    "critical": "It's rated urgent — worth fixing as soon as possible.",
+    "high": "It's worth fixing soon.",
+    "medium": "It's not urgent, but worth doing when convenient.",
+}
+_DEFAULT_URGENCY_CLAUSE = "It's worth addressing to keep this device on the safe side."
+
+
 # --- Trivy (filesystem) translations: procedural by package, since the CVE-bearing
 # `description` Trivy hands us (see synth_findings.py::_filesystem_payload) literally
 # embeds the raw CVE ID — that text must never be echoed into report output, only
@@ -357,11 +371,39 @@ _PACKAGE_INFO = {
     "python3.8": ("Python 3.8", "the Python programming language runtime"),
 }
 
-_SEVERITY_URGENCY_TEXT = {
-    "critical": "This is rated urgent — it's a serious issue worth fixing as soon as possible.",
-    "high": "This is worth fixing soon to avoid a real security risk.",
-    "medium": "This isn't urgent, but it's worth updating when convenient.",
+# Package-name-pattern -> category, used only to pick a why_it_matters angle (never
+# shown to the user) — coarse on purpose, since we can't hand-curate every package
+# name Trivy might report. Checked in order; first match wins.
+_PACKAGE_CATEGORY_PATTERNS = [
+    ("kernel",         ("linux-headers", "linux-image", "linux-modules", "linux-libc-dev", "linux-tools", "linux-firmware")),
+    ("crypto",         ("openssl", "libssl", "gnutls", "libgnutls", "ca-certificates")),
+    ("network_client", ("curl", "libcurl", "wget")),
+    ("remote_access",  ("openssh", "ssh")),
+    ("web_server",     ("apache2", "nginx", "httpd", "lighttpd")),
+    ("core_library",   ("glibc", "libc6", "libc-bin", "libc-dev")),
+    ("runtime",        ("python", "perl", "ruby", "openjdk", "nodejs", "php")),
+    ("system_service", ("systemd", "dbus", "udev", "polkit")),
+]
+
+_PACKAGE_CATEGORY_WHY = {
+    "kernel": "This is part of the device's core operating system, so a flaw here can potentially affect everything else running on it.",
+    "crypto": "This handles encryption for network connections, so a flaw here could let someone intercept or tamper with data in transit.",
+    "network_client": "Other installed programs use this to fetch data from the internet, so a flaw here can be triggered just by reaching the wrong server.",
+    "remote_access": "This handles remote logins to this device, so a flaw here is particularly sensitive.",
+    "web_server": "This is what serves web pages from this device, so a flaw here is directly exposed to anyone who can reach it over the network.",
+    "core_library": "This is used by nearly every program on the device, so a flaw here has a wide blast radius.",
+    "runtime": "Other software installed on this device runs on top of this, so a flaw here could affect any of it.",
+    "system_service": "This runs in the background on every boot, so a flaw here could be triggered without any user action.",
+    "general": "The real-world risk depends on how exposed or privileged the software using this component is.",
 }
+
+
+def _classify_package(pkg: str) -> str:
+    p = pkg.lower()
+    for category, prefixes in _PACKAGE_CATEGORY_PATTERNS:
+        if any(p.startswith(prefix) or prefix in p for prefix in prefixes):
+            return category
+    return "general"
 
 
 def translate_trivy_finding(affected: str, severity: str, remediation_refs: list) -> dict:
@@ -370,10 +412,12 @@ def translate_trivy_finding(affected: str, severity: str, remediation_refs: list
     short, desc = _PACKAGE_INFO.get(pkg, (pkg, f"the '{pkg}' software component"))
     how = f"1. Update {short} to version {fixed} or later." if fixed else f"1. Update {short} to the latest available version."
     how += "\n2. Most systems can do this automatically through their regular software updates."
+    why_base = _PACKAGE_CATEGORY_WHY[_classify_package(pkg)]
+    urgency = _SEVERITY_URGENCY_CLAUSE.get(severity, _DEFAULT_URGENCY_CLAUSE)
     return {
         "title": f"{short} is out of date and has a known security issue",
         "what_it_means": f"This device has an older version of {desc} installed, and that version has a known security issue.",
-        "why_it_matters": _SEVERITY_URGENCY_TEXT.get(severity, "This is worth addressing to keep this device on the safe side."),
+        "why_it_matters": f"{why_base} {urgency}",
         "how_to_fix": how,
     }
 
@@ -412,6 +456,83 @@ _LYNIS_CATEGORY_INTRO = {
     "Web Servers": "This is about the web server software running on this device.",
 }
 
+# What could actually happen if each category's setting is left as-is — this is what
+# was missing before: why_it_matters used to be picked from severity alone (2 strings
+# total across all 28 categories), so e.g. an SSH gap and a printing gap read
+# identically. Content now tracks the category; urgency still tracks severity
+# (appended separately below).
+_LYNIS_CATEGORY_WHY = {
+    "Authentication": "A weak spot here could make it easier for someone to guess or brute-force their way into an account.",
+    "Boot": "Someone with physical access to the device could use this to bypass normal login protections entirely.",
+    "Cryptography": "Weaker encryption here could let someone read or tamper with data that's supposed to be protected.",
+    "File Integrity": "Without this, unauthorized changes to important system files could go unnoticed.",
+    "File Permissions": "Overly loose permissions here could let other accounts or programs on the device read or change files they shouldn't.",
+    "Firewall": "A gap here could let unwanted network traffic reach services on this device that shouldn't be exposed.",
+    "Hardening": "This is a general safety margin — on its own it's low-risk, but gaps like this add up.",
+    "Home Directories": "Someone else with an account on this device could read personal files they shouldn't have access to.",
+    "Insecure Services": "Data sent through this service isn't protected, so it could be intercepted by someone else on the same network.",
+    "Kernel": "This affects the device at its most fundamental level, so a problem here can affect everything else running on it.",
+    "Logging": "Without proper logs, it's harder to notice or investigate suspicious activity after the fact.",
+    "MAC Frameworks": "Without this extra layer, a compromised program has more freedom to affect the rest of the device.",
+    "Mail": "A misconfiguration here could let this device be used to send spam or intercept email.",
+    "Malware": "Without this in place, malware landing on this device is less likely to be caught early.",
+    "Name Services": "A problem here could let someone redirect this device to a malicious server without it being obvious.",
+    "Networking": "This affects how this device communicates over the network, which is a common point of attack.",
+    "Packages": "Software that isn't kept up to date is more likely to have unpatched security holes.",
+    "PHP": "A misconfigured web-scripting setup is a common way attackers gain a foothold on a web server.",
+    "Printing": "This is a narrow, low-impact area — it mainly matters if the printing service is exposed to others.",
+    "Processes": "A weakness here could let one program interfere with or gain more access than another.",
+    "Scheduling": "A scheduled task with too much access could be abused to run something unintended.",
+    "SNMP": "This network-monitoring feature can leak information about the device if left open to more than intended.",
+    "SSH": "SSH is a common target for automated attacks, so weaknesses here are worth taking seriously.",
+    "Storage": "A problem here could affect data availability or let someone tamper with stored data.",
+    "Time/NTP": "An inaccurate clock can weaken security features (like certificate checks) that depend on correct timing.",
+    "Tooling": "This is a supporting tool rather than a direct exposure — it mainly helps you catch other problems sooner.",
+    "USB": "This affects what happens when a USB device is plugged in, which matters most if the device isn't physically secured.",
+    "Web Servers": "Web server misconfigurations are one of the most common ways attackers find a way in.",
+}
+
+# A title is derived from a LYNIS_TEST_CATALOG description's lead clause instead of
+# repeating the same "<category> setting worth reviewing" string for every finding in
+# a category — those descriptions are written as full "condition detected" sentences.
+# Guards against two bad cuts a naive comma-split produces: (1) descriptions that open
+# with a subordinate clause ("If not required, consider...") — the lead clause alone
+# is meaningless, so those skip straight to the category fallback; (2) a comma inside
+# parentheses ("No PAM module (pam_pwquality, pam_cracklib, ...) is installed") — split
+# only counts commas/" so "/" which "/"; " outside any (...) span.
+_TITLE_LEAD_SUBORDINATORS = {"if", "when", "since", "although", "unless", "while", "because", "as"}
+
+
+def _split_top_level_clause(text: str) -> str:
+    depth = 0
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            if ch in ",;":
+                return text[:i]
+            if text[i:i + 4] == " so " or text[i:i + 7] == " which ":
+                return text[:i]
+        i += 1
+    return text
+
+
+def _short_title(description: str, category: str) -> str:
+    text = (description or "").strip()
+    if not text:
+        return f"{category} setting worth reviewing"
+    first_word = text.split(" ", 1)[0].lower().rstrip(",")
+    if first_word in _TITLE_LEAD_SUBORDINATORS:
+        return f"{category} setting worth reviewing"
+    lead = _split_top_level_clause(text).strip().rstrip(".")
+    if not (8 <= len(lead) <= 70):
+        return f"{category} setting worth reviewing"
+    return lead[0].upper() + lead[1:]
+
 
 def translate_lynis_finding(affected: str, description: str, solution: str, severity: str) -> dict:
     test_id = affected[len("Host setting: "):]
@@ -420,15 +541,15 @@ def translate_lynis_finding(affected: str, description: str, solution: str, seve
     desc_sentence = (description or "").strip()
     if desc_sentence and not desc_sentence.endswith("."):
         desc_sentence += "."
-    why = ("This is a setting that's often targeted, so it's worth fixing soon." if severity == "high"
-           else "This isn't urgent, but tightening it reduces your overall risk over time.")
+    why_base = _LYNIS_CATEGORY_WHY.get(category, "Tightening this setting reduces your overall risk over time.")
+    urgency = _SEVERITY_URGENCY_CLAUSE.get(severity, _DEFAULT_URGENCY_CLAUSE)
     sol_sentence = (solution or "Review this setting and apply the recommended fix.").strip()
     if not sol_sentence.endswith("."):
         sol_sentence += "."
     return {
-        "title": f"{category} setting worth reviewing",
+        "title": _short_title(description, category),
         "what_it_means": f"{intro} {desc_sentence}".strip(),
-        "why_it_matters": why,
+        "why_it_matters": f"{why_base} {urgency}",
         "how_to_fix": f"1. {sol_sentence}",
     }
 

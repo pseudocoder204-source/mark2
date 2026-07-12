@@ -35,6 +35,8 @@ clamav_full_scan_log
 # export_trainset.py, never publish) ----
 finetune/train.jsonl
 finetune/eval.jsonl
+finetune/train_triage.jsonl
+finetune/eval_triage.jsonl
 
 # ---- Internal planning / scratch notes (not for the public repo) ----
 notes/

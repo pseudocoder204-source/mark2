@@ -1,4 +1,10 @@
-# mark2
+# Pulser
+
+[![License: GPL v2](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![GitHub stars](https://img.shields.io/github/stars/pseudocoder204-source/Pulser?style=social)](https://github.com/pseudocoder204-source/Pulser/stargazers)
+
+⭐ Star it if this is useful — helps me a lot as a 15-year-old student dev.
 
 A multi-scanner home-network security pipeline. It combines several open-source
 scanners into one agentic system that produces a **plain-English** security report for
@@ -18,16 +24,41 @@ order, flattens all findings into a single table, and uses an LLM **only** to re
 explain those findings — never to choose what to scan. See `CLAUDE.md` for the full
 architecture.
 
+![Pulser demo](docs/demo.gif)
+
 ## Why I built this
 
-I'm a 15-year-old self-taught developer, and this is my passion project. Small business owners and everyday people want to know their devices and network are safe, but there's no single tool that just tells you, in plain English, what's actually wrong and how to fix it. I'm not trying to replace Windows Defender or the pile of antivirus software already out there. I built mark2 to be a quick "health checkup" for your network and devices: run it, and it tells you exactly what it found and what to do about it, so you get peace of mind without needing to be a security expert.
+I'm a 15-year-old self-taught developer, and this is my passion project. Small business owners and everyday people want to know their devices and network are safe, but there's no single tool that just tells you, in plain English, what's actually wrong and how to fix it. I'm not trying to replace Windows Defender or the pile of antivirus software already out there. I built Pulser to be a quick "health checkup" for your network and devices: run it, and it tells you exactly what it found and what to do about it, so you get peace of mind without needing to be a security expert.
 
+## Example output
+
+```
+==============================================================
+  SECURITY DIAGNOSTIC REPORT   🔴 CRITICAL RISK
+==============================================================
+
+The scan found 12 issue(s) that need attention out of 14 item(s) reviewed.
+
+── ISSUES FOUND (12) ──────────────────────────────────────
+
+  1. 🔴 [CRITICAL]  SSH login could leak information about your smartcard setup
+     Affected       : Port 22 — ssh OpenSSH 9.6p1 Ubuntu 3ubuntu13.16
+     What it means  : This device's remote-login software (SSH) has a bug that could let someone learn more about your smartcard setup than they should.
+     Why it matters : This is worth fixing soon to avoid leaking information that shouldn't be public.
+     How to fix:
+       1. Update the SSH software to the latest version.
+       2. If you don't use this feature, consider turning it off in your SSH client settings.
+     References:
+       • https://access.redhat.com/errata/RHSA-2024:4312
+       • https://lists.fedoraproject.org/archives/list/package-announce%40lists.fedoraproject.org/message/AN2UDTXEUSKFIOIYMV6JNI5VSBMYZOFT/
+ ...
+```
 
 ## Requirements
 
 - Python 3.10+
 - The scanner binaries for your OS (see [Install the scanners](CONTRIBUTING_SCAN_DATA.md#install-the-scanners))
-- **[Nmap](https://nmap.org/download.html), installed by you.** mark2 does not ship Nmap
+- **[Nmap](https://nmap.org/download.html), installed by you.** Pulser does not ship Nmap
   for licensing reasons (see [Licensing and Attributions](#licensing-and-attributions)).
   Install it from your package manager (`apt install nmap`, `brew install nmap`,
   `apk add nmap nmap-scripts`) or nmap.org, and make sure it is on `$PATH` — or point
@@ -36,7 +67,7 @@ I'm a 15-year-old self-taught developer, and this is my passion project. Small b
 - An LLM backend: a local [Ollama](https://ollama.com) model (default, see
   [Setting up Ollama](#setting-up-ollama) below) **or** an Anthropic API key
 
-Without Nmap, mark2 still runs: the port/service, CVE-enrichment, and IoT default-credential
+Without Nmap, Pulser still runs: the port/service, CVE-enrichment, and IoT default-credential
 stages report `{"status": "unavailable"}` and the remaining scanners (Trivy, Nuclei, Lynis,
 ClamAV) proceed normally. You lose the network findings, not the run.
 
@@ -45,7 +76,7 @@ ClamAV) proceed normally. You lose the network findings, not the run.
 An installer script provisions the scanner tools, the Python dependencies, and the Ollama
 models in one shot. It **installs**, never bundles — every tool comes from your OS package
 manager or the tool's own upstream release (nmap from your distro/`winget`, Trivy and Nuclei
-from their official installers), so mark2 redistributes nothing. It's idempotent: anything
+from their official installers), so Pulser redistributes nothing. It's idempotent: anything
 already present is skipped.
 
 **Linux / macOS:**
@@ -80,37 +111,36 @@ pip install -r requirements.txt
 
 ## Setting up Ollama
 
-mark2 uses two LLM stages: **triage** (reorders findings, may pull in a few extra CVE
-details) and **report** (writes the plain-English report). By default both run on
-stock `llama3.1:8b`. mark2 also publishes a fine-tuned `mark2-report` model — trained on
-the report stage's actual prompt/output contract — that produces better home-user-facing
-reports than the stock model at the same size. Triage isn't fine-tuned yet, so it stays
-on `llama3.1:8b` for now; a fine-tuned `mark2-triage` is planned as a follow-up.
+Pulser has a single LLM stage: **report** (writes the plain-English report). Triage
+(ordering findings by priority) is deterministic Python, not an LLM call — three tuned
+triage models were evaluated and none beat the plain severity-tier+CVSS ordering on
+held-out data, so no LLM is invoked for it (see `notes/FinetuneGuideTriage.txt` Phase 5).
+By default report runs on stock `llama3.1:8b`. Pulser also publishes a fine-tuned
+`mark2-report` model — trained on the report stage's actual prompt/output contract —
+that produces better home-user-facing reports than the stock model at the same size.
 
-> If you ran the [Quick install](#quick-install) script with Ollama already installed, both
-> models below are already pulled — this section is the manual walkthrough and the
-> per-stage model reference.
+> If you ran the [Quick install](#quick-install) script with Ollama already installed, the
+> model below is already pulled — this section is the manual walkthrough and the
+> model reference.
 
 1. **Install Ollama** — see [ollama.com/download](https://ollama.com/download) for
    macOS/Windows/Linux instructions. Make sure it's running (`ollama serve`, or just
    launch the app — it starts a background service automatically on macOS/Windows).
 
-2. **Pull both models:**
+2. **Pull the model:**
 
    ```bash
-   ollama pull llama3.1:8b                       # triage stage
    ollama pull pseudocoder204/mark2-report        # report stage (fine-tuned)
    ```
 
-3. **Point each stage at the right model:**
+3. **Point the report stage at it:**
 
    ```bash
    export OLLAMA_MODEL=pseudocoder204/mark2-report
-   export OLLAMA_TRIAGE_MODEL=llama3.1:8b
    ```
 
-   These default to `llama3.1:8b` for both stages if unset, so this step is only needed
-   to opt into the fine-tuned report model.
+   This defaults to `llama3.1:8b` if unset, so this step is only needed to opt into the
+   fine-tuned report model.
 
 ## Running a diagnostic
 
@@ -180,17 +210,26 @@ and consent before scanning.
 
 👉 **See [CONTRIBUTING_SCAN_DATA.md](CONTRIBUTING_SCAN_DATA.md) for the full walkthrough.**
 
+## Team
+
+**Aditya Soni — Founder, Sole Architect & Engineer.** I conceived this project and built
+the entire codebase from scratch myself. 
+
+**Andrew Macedo — Outreach & Community Partner.** Andrew, my high school friend handles outreach and the
+non-technical side of the project. While I am actively involved here as well, having him on my team
+frees up more of my time to spend on engineering and product design. 
+
 ## License & attributions
 
-mark2 is licensed under the **GNU General Public License v2** (see [`LICENSE`](LICENSE)).
+Pulser is licensed under the **GNU General Public License v2** (see [`LICENSE`](LICENSE)).
 
-mark2 is just an orchestration layer: **it ships no scanner binaries.** You install the
-scanners yourself, and mark2 runs each as a separate program and reads its output — it never
+Pulser is just an orchestration layer: **it ships no scanner binaries.** You install the
+scanners yourself, and Pulser runs each as a separate program and reads its output — it never
 contains, links against, or modifies their code. So each scanner stays under its own license,
-and using mark2 asks nothing of you beyond installing the tools. Credit for the actual scanning
+and using Pulser asks nothing of you beyond installing the tools. Credit for the actual scanning
 belongs to their authors:
 
-| Tool | Author / Maintainer | License | Role in mark2 |
+| Tool | Author / Maintainer | License | Role in Pulser |
 |---|---|---|---|
 | [Nmap](https://nmap.org) | Nmap Software LLC (Gordon "Fyodor" Lyon) | [Nmap Public Source License](https://nmap.org/npsl/) (NPSL, GPLv2-derived) | Port/service discovery, version detection, IoT default-credential NSE checks |
 | [ClamAV](https://www.clamav.net) | Cisco Systems, Inc. / Talos | [GPL-2.0](https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt) | Malware scanning (`clamscan`) |
@@ -202,10 +241,10 @@ Each tool's full license text is kept in [`THIRD_PARTY_LICENSES/`](THIRD_PARTY_L
 CVE data comes from the [NVD](https://nvd.nist.gov/), which is public domain (NIST does not
 endorse this project).
 
-Two things worth knowing: mark2 does **not** bundle [Nmap](https://nmap.org/download.html)
+Two things worth knowing: Pulser does **not** bundle [Nmap](https://nmap.org/download.html)
 (install it yourself — a deliberate licensing choice), and you should only scan systems you own
 or are authorized to test.
 
-Packaging mark2 commercially, hosting it as a service, or bundling any scanner binary? The full
+Packaging Pulser commercially, hosting it as a service, or bundling any scanner binary? The full
 license analysis — NPSL/OEM, Docker source-offer, Npcap, hosted-deployment notices — lives in
 [LICENSING.md](LICENSING.md).

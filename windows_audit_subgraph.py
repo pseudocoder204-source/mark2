@@ -31,7 +31,7 @@ from typing import Any, Dict, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-from display_graph import display_graph
+# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
 from windows_audit_parser import (
     build_llm_payload_from_windows_audit,
@@ -123,7 +123,7 @@ def run_pipeline() -> Dict[str, Any]:
     in on Windows with no downstream change. Raises RuntimeError if any stage fails.
     """
     app = build_windows_audit_subgraph()
-    display_graph(app)
+    # display_graph(app)
     final_state = app.invoke({
         "raw_json": "",
         "facts":    {},
