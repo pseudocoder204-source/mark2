@@ -1,4 +1,4 @@
-# AstuteAI
+# mark2
 
 A multi-scanner home-network security pipeline. It combines several open-source
 scanners into one agentic system that produces a **plain-English** security report for
@@ -20,14 +20,14 @@ architecture.
 
 ## Why I built this
 
-I'm a 15-year-old self-taught developer, and this is my passion project. Small business owners and everyday people want to know their devices and network are safe, but there's no single tool that just tells you, in plain English, what's actually wrong and how to fix it. I'm not trying to replace Windows Defender or the pile of antivirus software already out there. I built AstuteAI to be a quick "health checkup" for your network and devices: run it, and it tells you exactly what it found and what to do about it, so you get peace of mind without needing to be a security expert.
+I'm a 15-year-old self-taught developer, and this is my passion project. Small business owners and everyday people want to know their devices and network are safe, but there's no single tool that just tells you, in plain English, what's actually wrong and how to fix it. I'm not trying to replace Windows Defender or the pile of antivirus software already out there. I built mark2 to be a quick "health checkup" for your network and devices: run it, and it tells you exactly what it found and what to do about it, so you get peace of mind without needing to be a security expert.
 
 
 ## Requirements
 
 - Python 3.10+
 - The scanner binaries for your OS (see [Install the scanners](CONTRIBUTING_SCAN_DATA.md#install-the-scanners))
-- **[Nmap](https://nmap.org/download.html), installed by you.** AstuteAI does not ship Nmap
+- **[Nmap](https://nmap.org/download.html), installed by you.** mark2 does not ship Nmap
   for licensing reasons (see [Licensing and Attributions](#licensing-and-attributions)).
   Install it from your package manager (`apt install nmap`, `brew install nmap`,
   `apk add nmap nmap-scripts`) or nmap.org, and make sure it is on `$PATH` — or point
@@ -36,7 +36,7 @@ I'm a 15-year-old self-taught developer, and this is my passion project. Small b
 - An LLM backend: a local [Ollama](https://ollama.com) model (default, see
   [Setting up Ollama](#setting-up-ollama) below) **or** an Anthropic API key
 
-Without Nmap, AstuteAI still runs: the port/service, CVE-enrichment, and IoT default-credential
+Without Nmap, mark2 still runs: the port/service, CVE-enrichment, and IoT default-credential
 stages report `{"status": "unavailable"}` and the remaining scanners (Trivy, Nuclei, Lynis,
 ClamAV) proceed normally. You lose the network findings, not the run.
 
@@ -45,7 +45,7 @@ ClamAV) proceed normally. You lose the network findings, not the run.
 An installer script provisions the scanner tools, the Python dependencies, and the Ollama
 models in one shot. It **installs**, never bundles — every tool comes from your OS package
 manager or the tool's own upstream release (nmap from your distro/`winget`, Trivy and Nuclei
-from their official installers), so AstuteAI redistributes nothing. It's idempotent: anything
+from their official installers), so mark2 redistributes nothing. It's idempotent: anything
 already present is skipped.
 
 **Linux / macOS:**
@@ -80,12 +80,12 @@ pip install -r requirements.txt
 
 ## Setting up Ollama
 
-AstuteAI uses two LLM stages: **triage** (reorders findings, may pull in a few extra CVE
+mark2 uses two LLM stages: **triage** (reorders findings, may pull in a few extra CVE
 details) and **report** (writes the plain-English report). By default both run on
-stock `llama3.1:8b`. AstuteAI also publishes a fine-tuned `AstuteAI-report` model — trained on
+stock `llama3.1:8b`. mark2 also publishes a fine-tuned `mark2-report` model — trained on
 the report stage's actual prompt/output contract — that produces better home-user-facing
 reports than the stock model at the same size. Triage isn't fine-tuned yet, so it stays
-on `llama3.1:8b` for now; a fine-tuned `AstuteAI-triage` is planned as a follow-up.
+on `llama3.1:8b` for now; a fine-tuned `mark2-triage` is planned as a follow-up.
 
 > If you ran the [Quick install](#quick-install) script with Ollama already installed, both
 > models below are already pulled — this section is the manual walkthrough and the
@@ -99,13 +99,13 @@ on `llama3.1:8b` for now; a fine-tuned `AstuteAI-triage` is planned as a follow-
 
    ```bash
    ollama pull llama3.1:8b                       # triage stage
-   ollama pull pseudocoder204/AstuteAI-report        # report stage (fine-tuned)
+   ollama pull pseudocoder204/mark2-report        # report stage (fine-tuned)
    ```
 
 3. **Point each stage at the right model:**
 
    ```bash
-   export OLLAMA_MODEL=pseudocoder204/AstuteAI-report
+   export OLLAMA_MODEL=pseudocoder204/mark2-report
    export OLLAMA_TRIAGE_MODEL=llama3.1:8b
    ```
 
@@ -148,8 +148,8 @@ on first run (slower, less complete). Set `NVD_API_KEY` for higher NVD rate limi
 ## Docker
 
 ```bash
-docker build -t AstuteAI .
-docker run --rm --network host -e TARGET=192.168.1.1 AstuteAI
+docker build -t mark2 .
+docker run --rm --network host -e TARGET=192.168.1.1 mark2
 ```
 
 The default image **does not contain Nmap** (see
@@ -158,7 +158,7 @@ report `unavailable`. To get them back, build an image with Nmap included **for 
 local use**:
 
 ```bash
-docker build --build-arg INSTALL_NMAP=true -t AstuteAI .
+docker build --build-arg INSTALL_NMAP=true -t mark2 .
 ```
 
 An image built that way must not be pushed to a registry or otherwise redistributed —
@@ -182,15 +182,15 @@ and consent before scanning.
 
 ## License & attributions
 
-AstuteAI is licensed under the **GNU General Public License v2** (see [`LICENSE`](LICENSE)).
+mark2 is licensed under the **GNU General Public License v2** (see [`LICENSE`](LICENSE)).
 
-AstuteAI is just an orchestration layer: **it ships no scanner binaries.** You install the
-scanners yourself, and AstuteAI runs each as a separate program and reads its output — it never
+mark2 is just an orchestration layer: **it ships no scanner binaries.** You install the
+scanners yourself, and mark2 runs each as a separate program and reads its output — it never
 contains, links against, or modifies their code. So each scanner stays under its own license,
-and using AstuteAI asks nothing of you beyond installing the tools. Credit for the actual scanning
+and using mark2 asks nothing of you beyond installing the tools. Credit for the actual scanning
 belongs to their authors:
 
-| Tool | Author / Maintainer | License | Role in AstuteAI |
+| Tool | Author / Maintainer | License | Role in mark2 |
 |---|---|---|---|
 | [Nmap](https://nmap.org) | Nmap Software LLC (Gordon "Fyodor" Lyon) | [Nmap Public Source License](https://nmap.org/npsl/) (NPSL, GPLv2-derived) | Port/service discovery, version detection, IoT default-credential NSE checks |
 | [ClamAV](https://www.clamav.net) | Cisco Systems, Inc. / Talos | [GPL-2.0](https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt) | Malware scanning (`clamscan`) |
@@ -202,10 +202,10 @@ Each tool's full license text is kept in [`THIRD_PARTY_LICENSES/`](THIRD_PARTY_L
 CVE data comes from the [NVD](https://nvd.nist.gov/), which is public domain (NIST does not
 endorse this project).
 
-Two things worth knowing: AstuteAI does **not** bundle [Nmap](https://nmap.org/download.html)
+Two things worth knowing: mark2 does **not** bundle [Nmap](https://nmap.org/download.html)
 (install it yourself — a deliberate licensing choice), and you should only scan systems you own
 or are authorized to test.
 
-Packaging AstuteAI commercially, hosting it as a service, or bundling any scanner binary? The full
+Packaging mark2 commercially, hosting it as a service, or bundling any scanner binary? The full
 license analysis — NPSL/OEM, Docker source-offer, Npcap, hosted-deployment notices — lives in
 [LICENSING.md](LICENSING.md).
