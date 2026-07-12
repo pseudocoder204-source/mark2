@@ -2,10 +2,12 @@
 #
 # mark2 native installer for Windows.
 #
-# What this does: installs the scanners that have Windows binaries (Trivy,
-# Nuclei), the Python dependencies, and pulls the Ollama models. On Windows the
-# host audit uses the native PowerShell audit and malware uses Windows Defender's
-# own threat history, so Lynis and ClamAV are intentionally NOT installed here.
+# What this does: installs nmap, Nuclei, the Python dependencies, and pulls the
+# Ollama models. On Windows the host audit uses the native PowerShell audit and
+# malware uses Windows Defender's own threat history, so Lynis and ClamAV are
+# intentionally NOT installed here. Trivy is also NOT installed - its
+# filesystem-scan mode is always skipped on Windows (see below), so mark2 never
+# invokes it there.
 #
 # Licensing note (see LICENSING.md): mark2 ships no scanner binaries.
 #   * nmap  - installed via winget if available (from nmap.org's own published
@@ -63,21 +65,14 @@ if ($npcapPresent) {
     $manual += "Npcap - install yourself from https://npcap.com/#download (mark2 cannot redistribute it)"
 }
 
-# --- 3. Trivy + Nuclei (Windows binaries from upstream) -----------------------
+# --- 3. Nuclei (Windows binary from upstream) ----------------------------------
+# Trivy is deliberately NOT installed here: tools.scan_filesystem() always
+# returns {"status":"skipped"} on Windows (its fs mode reads Linux package DBs
+# - dpkg/rpm/apk - that don't exist on Windows; host audit's Windows Update
+# check covers OS-patch state instead), so installing it would just be wasted
+# time/bandwidth for a scanner mark2 will never invoke on this platform.
 $binDir = if ($env:MARK2_BIN_DIR) { $env:MARK2_BIN_DIR } else { Join-Path $PSScriptRoot "bin" }
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-
-if (Have trivy) {
-    Ok "Trivy already installed"; $already += "Trivy"
-} elseif ($hasWinget) {
-    Info "Installing Trivy via winget"
-    try { winget install --id AquaSecurity.Trivy --accept-package-agreements --accept-source-agreements -e | Out-Null
-          Ok "Trivy installed"; $installed += "Trivy" }
-    catch { Failm "Trivy install failed"; $manual += "Trivy - https://trivy.dev (or drop trivy.exe in $binDir)" }
-} else {
-    $manual += "Trivy - download trivy.exe from https://github.com/aquasecurity/trivy/releases into $binDir"
-}
-Warn "Note: Trivy's filesystem scan is skipped on Windows (no dpkg/rpm/apk DB); host audit covers OS patch state instead."
 
 if (Have nuclei) {
     Ok "Nuclei already installed"; $already += "Nuclei"
