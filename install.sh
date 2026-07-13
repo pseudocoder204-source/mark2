@@ -3,9 +3,9 @@
 #
 # mark2 native installer for Linux and macOS.
 #
-# What this does: installs the scanner tools mark2 orchestrates, the Python
-# dependencies, and pulls the Ollama models — so a fresh clone is one command
-# away from `python3 agent.py`.
+# What this does: installs the scanner tools mark2 orchestrates and the Python
+# dependencies, and checks for Ollama. It deliberately does not pull any Ollama
+# model — see the README's "Setting up Ollama" section to pick and pull one.
 #
 # Licensing note (see LICENSING.md): mark2 ships no scanner binaries. This
 # script does not bundle or host any tool — it drives your OS package manager
@@ -170,22 +170,16 @@ else
     MISSING+=("Python 3.10+")
 fi
 
-# ── 5. Ollama models ──────────────────────────────────────────────────────────
-# Edit this list as you publish more models; the script pulls each one.
-OLLAMA_MODELS=("llama3.1:8b" "pseudocoder204/mark2-report")
+# ── 5. Ollama ────────────────────────────────────────────────────────────────
+# Model pulls are deliberately not automated here — llama3.1:8b and
+# mark2-report are multi-GB downloads, and which one (or neither, if you're
+# on Claude) you want is a choice for the user, not this script. See the
+# README's "Setting up Ollama" section for the pull commands.
 if have ollama; then
-    for m in "${OLLAMA_MODELS[@]}"; do
-        if ollama list 2>/dev/null | grep -q "^${m%% *}"; then
-            ok "Ollama model $m already present"; ALREADY+=("ollama:$m")
-        else
-            info "Pulling Ollama model $m"
-            if ollama pull "$m" >/dev/null 2>&1; then ok "Pulled $m"; INSTALLED+=("ollama:$m")
-            else warn "Could not pull $m — is 'ollama serve' running?"; MISSING+=("ollama:$m"); fi
-        fi
-    done
+    ok "Ollama already installed"; ALREADY+=("ollama")
 else
-    warn "Ollama not found — skipping model pulls"
-    MANUAL+=("Ollama: install from https://ollama.com/download, then re-run this script (or: ${OLLAMA_MODELS[*]/#/ollama pull })")
+    warn "Ollama not found — skipping"
+    MANUAL+=("Ollama: install from https://ollama.com/download, then see the README's 'Setting up Ollama' section to pull a report-stage model")
 fi
 
 # ── summary ───────────────────────────────────────────────────────────────────

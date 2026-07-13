@@ -2,12 +2,13 @@
 #
 # Pulser native installer for Windows.
 #
-# What this does: installs nmap, Nuclei, the Python dependencies, and pulls the
-# Ollama models. On Windows the host audit uses the native PowerShell audit and
-# malware uses Windows Defender's own threat history, so Lynis and ClamAV are
-# intentionally NOT installed here. Trivy is also NOT installed - its
-# filesystem-scan mode is always skipped on Windows (see below), so Pulser never
-# invokes it there.
+# What this does: installs nmap, Nuclei, the Python dependencies, and checks
+# for Ollama. It deliberately does not pull any Ollama model - see the
+# README's "Setting up Ollama" section to pick and pull one. On Windows the
+# host audit uses the native PowerShell audit and malware uses Windows
+# Defender's own threat history, so Lynis and ClamAV are intentionally NOT
+# installed here. Trivy is also NOT installed - its filesystem-scan mode is
+# always skipped on Windows (see below), so Pulser never invokes it there.
 #
 # Licensing note (see LICENSING.md): Pulser ships no scanner binaries.
 #   * nmap  - installed via winget if available (from nmap.org's own published
@@ -107,22 +108,16 @@ if (Have python) {
     Failm "python not found - install Python 3.10+ from https://python.org"; $missing += "Python 3.10+"
 }
 
-# --- 5. Ollama models -------------------------------------------------------
-# Edit this list as you publish more models.
-$ollamaModels = @("llama3.1:8b", "pseudocoder204/mark2-report")
+# --- 5. Ollama ---------------------------------------------------------------
+# Model pulls are deliberately not automated here - llama3.1:8b and
+# mark2-report are multi-GB downloads, and which one (or neither, if you're
+# on Claude) you want is a choice for the user, not this script. See the
+# README's "Setting up Ollama" section for the pull commands.
 if (Have ollama) {
-    foreach ($m in $ollamaModels) {
-        $present = (ollama list 2>$null | Select-String -SimpleMatch ($m -split ' ')[0])
-        if ($present) { Ok "Ollama model $m already present"; $already += "ollama:$m" }
-        else {
-            Info "Pulling Ollama model $m"
-            try { ollama pull $m | Out-Null; Ok "Pulled $m"; $installed += "ollama:$m" }
-            catch { Warn "Could not pull $m - is Ollama running?"; $missing += "ollama:$m" }
-        }
-    }
+    Ok "Ollama already installed"; $already += "ollama"
 } else {
-    Warn "Ollama not found - skipping model pulls"
-    $manual += "Ollama - install from https://ollama.com/download, then re-run this script"
+    Warn "Ollama not found - skipping"
+    $manual += "Ollama - install from https://ollama.com/download, then see the README's 'Setting up Ollama' section to pull a report-stage model"
 }
 
 # --- summary -----------------------------------------------------------------

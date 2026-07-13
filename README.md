@@ -54,6 +54,20 @@ The scan found 12 issue(s) that need attention out of 14 item(s) reviewed.
  ...
 ```
 
+## Get the code
+
+Clone the repository, then move into the new directory it creates before running anything
+else in this guide:
+
+```bash
+git clone https://github.com/pseudocoder204-source/Pulser.git
+cd Pulser
+```
+
+(Prefer SSH? `git clone git@github.com:pseudocoder204-source/Pulser.git` works the same
+way.) Every command below — `install.sh`/`install.ps1`, `pip install`, `python3 agent.py`,
+`docker build` — assumes you're running it from inside that `Pulser/` directory.
+
 ## Requirements
 
 - Python 3.10+
@@ -73,11 +87,11 @@ ClamAV) proceed normally. You lose the network findings, not the run.
 
 ## Quick install
 
-An installer script provisions the scanner tools, the Python dependencies, and the Ollama
-models in one shot. It **installs**, never bundles — every tool comes from your OS package
-manager or the tool's own upstream release (nmap from your distro/`winget`, Trivy and Nuclei
-from their official installers), so Pulser redistributes nothing. It's idempotent: anything
-already present is skipped.
+An installer script provisions the scanner tools and the Python dependencies in one shot. It
+**installs**, never bundles — every tool comes from your OS package manager or the tool's own
+upstream release (nmap from your distro/`winget`, Trivy and Nuclei from their official
+installers), so Pulser redistributes nothing. It's idempotent: anything already present is
+skipped.
 
 **Linux / macOS:**
 
@@ -85,6 +99,14 @@ already present is skipped.
 python3 -m venv .venv && source .venv/bin/activate   # recommended
 ./install.sh
 ```
+
+> **macOS:** while `brew install`s Lynis, you may see a system prompt like *"Terminal would
+> like to access files in your Documents folder."* That's macOS's own privacy protection
+> (TCC) reacting to Lynis's post-install step touching your home directory — `install.sh`
+> itself never runs Lynis, it only installs the binary. It's safe to click **Allow**. You may
+> see a similar prompt again later for real, when you actually run a diagnostic — Lynis's
+> `audit_host` stage genuinely scans your filesystem for hardening checks, so that one's
+> expected too.
 
 **Windows** (PowerShell):
 
@@ -96,10 +118,13 @@ python -m venv .venv; .\.venv\Scripts\Activate.ps1   # recommended
 The script prints a summary of what it installed and what you must still do yourself. It
 deliberately does **not** touch three things:
 
+- **Ollama itself, or any Ollama model** — the script only checks whether `ollama` is on
+  `PATH` and tells you where to get it if not. It never pulls a model: `llama3.1:8b` and the
+  fine-tuned `mark2-report` are both multi-gigabyte downloads, and which one you want (or
+  whether you're using Claude instead) is your call, not something worth blocking `install.sh`
+  on. See [Setting up Ollama](#setting-up-ollama) below.
 - **Npcap** (Windows LAN scans) — its license forbids redistribution, so `install.ps1` only
   detects it and links to [npcap.com](https://npcap.com/#download); you install it yourself.
-- **Ollama itself** — install it from [ollama.com/download](https://ollama.com/download) first
-  (the script pulls the *models* but not the runtime). Re-run the script after installing it.
 - **The CVE cache** (~3.2 GB) — download it from Releases (see [The CVE cache](#the-cve-cache)).
 
 Prefer to do it by hand? Everything the script does is spelled out below — install the
@@ -115,32 +140,36 @@ Pulser has a single LLM stage: **report** (writes the plain-English report). Tri
 (ordering findings by priority) is deterministic Python, not an LLM call — three tuned
 triage models were evaluated and none beat the plain severity-tier+CVSS ordering on
 held-out data, so no LLM is invoked for it (see `notes/FinetuneGuideTriage.txt` Phase 5).
-By default report runs on stock `llama3.1:8b`. Pulser also publishes a fine-tuned
-`mark2-report` model — trained on the report stage's actual prompt/output contract —
-that produces better home-user-facing reports than the stock model at the same size.
 
-> If you ran the [Quick install](#quick-install) script with Ollama already installed, the
-> model below is already pulled — this section is the manual walkthrough and the
-> model reference.
+Neither [Quick install](#quick-install) nor `install.sh`/`install.ps1` pulls an Ollama model
+for you — both are multi-gigabyte downloads, and picking one is up to you, not something to
+wait on during setup. Pick one of these:
+
+- **`pseudocoder204/mark2-report`** (recommended) — a fine-tuned model trained on the report
+  stage's actual prompt/output contract; produces better home-user-facing reports than the
+  stock model at the same size.
+- **`llama3.1:8b`** (stock) — pick this if you'd rather stay on an untuned, more widely-used
+  base model, or if you're already using it for something else and don't want a second
+  multi-GB pull.
 
 1. **Install Ollama** — see [ollama.com/download](https://ollama.com/download) for
    macOS/Windows/Linux instructions. Make sure it's running (`ollama serve`, or just
    launch the app — it starts a background service automatically on macOS/Windows).
 
-2. **Pull the model:**
+2. **Pull a model** (pick one from above):
 
    ```bash
-   ollama pull pseudocoder204/mark2-report        # report stage (fine-tuned)
+   ollama pull "pseudocoder204/mark2-report"        # recommended
+   # or
+   ollama pull llama3.1:8b                          # stock
    ```
 
-3. **Point the report stage at it:**
+3. **Point the report stage at it** (only needed for `mark2-report` — `llama3.1:8b` is
+   already the default if `OLLAMA_MODEL` is unset):
 
    ```bash
    export OLLAMA_MODEL=pseudocoder204/mark2-report
    ```
-
-   This defaults to `llama3.1:8b` if unset, so this step is only needed to opt into the
-   fine-tuned report model.
 
 ## Running a diagnostic
 
