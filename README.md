@@ -269,6 +269,10 @@ $gz.Close(); $out.Close(); $in.Close()
 Without it, the pipeline creates an empty cache and syncs ~30 days of recent CVEs from NVD
 on first run (slower, less complete). Set `NVD_API_KEY` for higher NVD rate limits.
 
+The release asset is re-synced from NVD and re-uploaded every Monday by
+`.github/workflows/refresh-cve-cache.yml`, so a fresh download is never more than a week
+behind and the first run only has to catch up a few days.
+
 ## Docker
 
 ```bash
