@@ -149,11 +149,11 @@ that produces better home-user-facing reports than the stock model at the same s
 ```bash
 # Scan your own machine (default target 127.0.0.1) with the default Ollama backend
 # (stock llama3.1:8b for the report stage)
-python3 agent.py [--target IP] [--json]
+python3 agent.py [--target IP]
 
 # Use the fine-tuned mark2-report model for the report stage instead of stock
 # llama3.1:8b (after pulling it — see [Setting up Ollama](#setting-up-ollama)):
-OLLAMA_MODEL=pseudocoder204/mark2-report python3 agent.py [--target IP] [--json]
+OLLAMA_MODEL=pseudocoder204/mark2-report python3 agent.py [--target IP]
 
 # Use Anthropic instead of Ollama
 LLM_PROVIDER=claude ANTHROPIC_API_KEY=sk-... python3 agent.py
@@ -165,18 +165,33 @@ valid syntax; set the environment variable first, then run the script):
 ```powershell
 # Scan your own machine (default target 127.0.0.1) with the default Ollama backend
 # (stock llama3.1:8b for the report stage)
-python agent.py --target IP --json
+python agent.py --target IP
 
 # Use the fine-tuned mark2-report model for the report stage instead of stock
 # llama3.1:8b (after pulling it — see [Setting up Ollama](#setting-up-ollama)):
 $env:OLLAMA_MODEL = "pseudocoder204/mark2-report"
-python agent.py --target IP --json
+python agent.py --target IP
 
 # Use Anthropic instead of Ollama
 $env:LLM_PROVIDER = "claude"
 $env:ANTHROPIC_API_KEY = "sk-..."
 python agent.py
 ```
+
+Both the LLM-generated report and everything under it are produced either way — `--json`
+only changes how the *same* output is printed. Without it, the report is rendered as
+human-readable text for a person to read in the terminal. With it, the identical report
+object (`overall_risk`, `summary`, `findings[]`, `good_news[]`) is printed as raw JSON
+instead, e.g. `python3 agent.py --json > report.json`. Only pass `--json` when the caller
+wants machine-readable output (piping into another program) rather than a human-readable
+report — it's not needed for normal interactive use, which is why it's omitted from the
+examples above.
+
+> **First run:** if `vulnerability_cache.db` needs a sync against the live NVD API (see
+> [The CVE cache](#the-cve-cache) below), the first `agent.py` run can take a while —
+> the NVD rate-limits requests, so the sync sleeps between calls (6.5s without an
+> `NVD_API_KEY`, 1.5s with one). This is expected; subsequent runs sync incrementally
+> and are fast.
 
 You can also run any single scanner's subgraph standalone:
 
