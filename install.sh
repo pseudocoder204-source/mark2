@@ -107,6 +107,22 @@ confirm() {
     case "$reply" in [nN]*) return 1 ;; *) return 0 ;; esac
 }
 
+# A backgrounded `wait $PID` gives zero console output for as long as the job
+# runs (a multi-GB model pull or a 3.2 GB cache decompression), which reads as
+# a hung installer. Print an elapsed-time heartbeat every few seconds instead,
+# then return the child's real exit status via a final `wait`.
+wait_with_heartbeat() {
+    local pid="$1" label="$2" start elapsed
+    start=$(date +%s)
+    while kill -0 "$pid" 2>/dev/null; do
+        elapsed=$(( $(date +%s) - start ))
+        printf '\r  ...  %s (%ss elapsed, still running)  ' "$label" "$elapsed"
+        sleep 3
+    done
+    printf '\r%80s\r' ""
+    wait "$pid"
+}
+
 # ── detect OS + package manager ───────────────────────────────────────────────
 OS="$(uname -s)"
 PM=""
@@ -254,8 +270,17 @@ else
             if ollama list 2>/dev/null | grep -q "^${MODEL%%:*}"; then
                 ok "Model $MODEL already pulled"; ALREADY+=("model $MODEL")
             else
-                info "Pulling $MODEL in the background (multi-GB — this is the slow part)"
-                ( set -e; ollama pull "$MODEL" ) > "$OLLAMA_LOG" 2>&1 &
+                info "Pulling $MODEL in the background (multi-GB — this is the slow part, retries automatically on transient failures)"
+                (
+                    set -e
+                    attempt=1
+                    until ollama pull "$MODEL"; do
+                        [ "$attempt" -ge 3 ] && exit 1
+                        echo "--- pull attempt $attempt failed, retrying in 5s (ollama resumes from cached layers) ---"
+                        attempt=$((attempt + 1))
+                        sleep 5
+                    done
+                ) > "$OLLAMA_LOG" 2>&1 &
                 OLLAMA_PID=$!
             fi
         else
@@ -397,23 +422,32 @@ EOF
     ok "Launcher installed at $SHIM"; INSTALLED+=("pulser launcher")
     case ":$PATH:" in
         *":$SHIM_DIR:"*) ;;
-        *) MANUAL+=("Add $SHIM_DIR to your PATH:  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc") ;;
+        *)
+            # macOS has defaulted to zsh since Catalina; Linux distros vary. Target
+            # whatever $SHELL actually says, not a hardcoded ~/.bashrc that a zsh
+            # user would never source.
+            case "${SHELL:-}" in
+                */zsh) RC="~/.zshrc" ;;
+                *)     RC="~/.bashrc" ;;
+            esac
+            MANUAL+=("Add $SHIM_DIR to your PATH:  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $RC")
+            ;;
     esac
 fi
 
 # ── 6. wait on the background jobs ────────────────────────────────────────────
 if [ -n "$OLLAMA_PID" ]; then
     info "Waiting for the $MODEL pull to finish"
-    if wait "$OLLAMA_PID"; then
+    if wait_with_heartbeat "$OLLAMA_PID" "pulling $MODEL"; then
         ok "Model $MODEL pulled"; INSTALLED+=("model $MODEL")
     else
-        fail "Model pull failed"; sed -n '$p' "$OLLAMA_LOG" >&2 || true
+        fail "Model pull failed after retries"; sed -n '$p' "$OLLAMA_LOG" >&2 || true
         MANUAL+=("ollama pull $MODEL")
     fi
 fi
 if [ -n "$CACHE_PID" ]; then
     info "Waiting for the CVE cache download to finish"
-    if wait "$CACHE_PID"; then
+    if wait_with_heartbeat "$CACHE_PID" "downloading + unpacking the CVE cache"; then
         ok "CVE cache ready ($(du -h "$CACHE_DB" 2>/dev/null | cut -f1))"; INSTALLED+=("CVE cache")
     else
         fail "CVE cache download failed"; sed -n '$p' "$CACHE_LOG" >&2 || true

@@ -242,11 +242,16 @@ if ($Claude) {
             if ((ollama list 2>$null | Out-String) -match [regex]::Escape($Model)) {
                 Ok "Model $Model already pulled"; $already += "model $Model"
             } else {
-                Info "Pulling $Model in the background (multi-GB - this is the slow part)"
+                Info "Pulling $Model in the background (multi-GB - this is the slow part, retries automatically on transient failures)"
                 $ollamaJob = Start-Job -ArgumentList $Model -ScriptBlock {
                     param($m)
-                    & ollama pull $m 2>&1 | Out-String
-                    if ($LASTEXITCODE -ne 0) { throw "ollama pull failed with exit code $LASTEXITCODE" }
+                    for ($attempt = 1; $attempt -le 3; $attempt++) {
+                        & ollama pull $m 2>&1 | Out-String | Write-Output
+                        if ($LASTEXITCODE -eq 0) { return }
+                        Write-Output "--- pull attempt $attempt failed, retrying in 5s (ollama resumes from cached layers) ---"
+                        Start-Sleep -Seconds 5
+                    }
+                    throw "ollama pull failed after 3 attempts"
                 }
             }
         } else {
