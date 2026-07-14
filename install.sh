@@ -173,8 +173,7 @@ fi
 # ── 5. Ollama ────────────────────────────────────────────────────────────────
 # Model pulls are deliberately not automated here — llama3.1:8b and
 # mark2-report are multi-GB downloads, and which one (or neither, if you're
-# on Claude) you want is a choice for the user, not this script. See the
-# README's "Setting up Ollama" section for the pull commands.
+# on Claude) you want is a choice for the user, not this script.
 if have ollama; then
     ok "Ollama already installed"; ALREADY+=("ollama")
 else

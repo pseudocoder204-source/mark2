@@ -55,10 +55,8 @@ image = (
 )
 
 BASE_MODEL = "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
-# Re-measured over the re-exported (split-fixed) train/eval jsonl with the
-# 7B tokenizer on 2026-07-12: p50=1255, p90=11233, p95=13914, max=21153
-# (n=303) — identical shape to the 3B run since Qwen2.5 shares one tokenizer
-# across sizes. Same headroom margin as the 3B multi-turn trainer.
+# Same token-length distribution as the 3B run, since Qwen2.5 shares one
+# tokenizer across sizes. Same headroom margin as the 3B multi-turn trainer.
 MAX_SEQ_LENGTH = 24576
 OUTPUT_DIR = "/output"
 
@@ -77,7 +75,7 @@ def train():
         load_in_4bit=True,
     )
 
-    # Same r=16 config as the 3B runs (Step 9: "config carries over").
+    # Same r=16 config as the 3B runs.
     model = FastLanguageModel.get_peft_model(
         model,
         r=16,

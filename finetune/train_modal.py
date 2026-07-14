@@ -79,7 +79,7 @@ def train():
         load_in_4bit=True,
     )
 
-    # Step 11: r=16 is enough for a formatting+voice skill, not a knowledge task.
+    # r=16 is enough for a formatting+voice skill, not a knowledge task.
     model = FastLanguageModel.get_peft_model(
         model,
         r=16,

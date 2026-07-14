@@ -37,7 +37,7 @@ from agent import build_findings_table
 
 _VULN_DB_PATH = "vulnerability_cache.db"
 
-# Matches the live schema (trainset.db already carries these columns as of Step 1); kept as
+# Matches the live schema (trainset.db already carries these columns); kept as
 # CREATE TABLE IF NOT EXISTS so this script can also bootstrap a fresh trainset.db from scratch.
 _TRAINSET_SCHEMA = """
 CREATE TABLE IF NOT EXISTS examples (
@@ -54,8 +54,7 @@ CREATE TABLE IF NOT EXISTS examples (
 """
 
 # cvss scores with enough distinct-vendor CVE inventory in vulnerability_cache.db to draw
-# multiple genuinely different products from (see audit in the Step 3 session — thousands of
-# distinct cpe_base rows at each of these exact scores).
+# multiple genuinely different products from.
 _CRITICAL_SCORES = [9.8, 9.6, 9.9, 10.0]
 _HIGH_SCORES = [7.5, 7.8, 8.1, 8.8]
 _MEDIUM_SCORES = [5.3, 5.9, 6.1, 6.5]
@@ -171,7 +170,7 @@ def _assemble(network: List[Dict[str, Any]], iot: List[Dict[str, Any]]) -> Dict[
     }
 
 
-# --- Contest shapes (Step 3a-3d) -----------------------------------------------
+# --- Contest shapes --------------------------------------------------------
 
 def _shape_contested(conn: sqlite3.Connection, scores: List[float]) -> Dict[str, Any]:
     """2-4 tied, distinct-CVE findings in one tier (Step 3a/3b) plus a couple of uncontested
@@ -236,8 +235,7 @@ _SHAPES = {
     "no_contest_low": _shape_no_contest_low,
 }
 
-# Default mix: ~40%+ escalation-worthy (contested_*), rest zero-tool-call (no_contest_*),
-# combined with the 18 reused real rows from Step 2 to land the ~250-300-row corpus target.
+# Default mix: ~40%+ escalation-worthy (contested_*), rest zero-tool-call (no_contest_*).
 _DEFAULT_COUNTS = {
     "contested_critical": 40,
     "contested_high": 40,

@@ -312,7 +312,7 @@ def main() -> None:
                 "target": args.target,
                 "collector_host": socket.gethostname(),
                 "platform": platform.platform(),
-                "platform_system": platform.system().lower(),  # normalized OS family for the platform column
+                "platform_system": platform.system().lower(),
                 "malware_mode": args.malware,
                 "shape": result["shape"],
                 "tier_histogram": result.get("tier_histogram"),

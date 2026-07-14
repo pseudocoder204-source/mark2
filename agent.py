@@ -515,15 +515,11 @@ def _deterministic_report(table: List[Dict[str, Any]], order: List[int]) -> Dict
     }
 
 
-# mark2-report (finetune/train.jsonl) was trained on inputs of at most 14 facts —
-# real hosts with a vulnerable OS + several open services + IoT script findings
-# routinely blow past that (e.g. 32 facts / 21 findings), which is well outside
-# anything the eval set exercised (it's all 0-finding "low" cases). Past the
-# training distribution the model stops copying and starts inventing content
-# (e.g. a fabricated "Model XYZ" finding), tripping _validate_report_severities.
-# Chunking keeps every LLM call in-distribution; this is a stopgap until a second
-# wave of higher-count training examples lets the model be retrained on the full
-# range (see notes/FinetuneGuide.txt).
+# mark2-report was trained on inputs with a bounded number of facts; real hosts with
+# a vulnerable OS plus several open services and IoT script findings routinely exceed
+# that. Past the training distribution the model stops copying and starts inventing
+# content, tripping _validate_report_severities. Chunking keeps every LLM call
+# in-distribution; this is a stopgap until the model is retrained on the full range.
 _REPORT_CHUNK_SIZE = 10
 
 

@@ -33,8 +33,8 @@ _SKIP_DIR_PATTERNS = [
 ]
 
 # How old (hours) Trivy's local vulnerability DB can be before we bother
-# triggering a re-download — mirrors clamav_parser.py's freshclam skip so a
-# scan doesn't pay a network fetch on every single invocation.
+# triggering a re-download — avoids paying a network fetch on every single
+# invocation.
 _TRIVY_DB_MAX_AGE_HOURS = 24
 
 
@@ -135,8 +135,7 @@ def build_llm_payload_from_trivy(trivy_results: List[Dict[str, Any]]) -> Dict[st
     and isolates the top 10 worst bugs to protect LLM context windows.
     """
     priority_findings = []
-    
-    # Initialize metrics for overall risk scoring
+
     critical_count = 0
     high_count = 0
     medium_count = 0
@@ -146,8 +145,7 @@ def build_llm_payload_from_trivy(trivy_results: List[Dict[str, Any]]) -> Dict[st
         vulnerabilities = target.get("Vulnerabilities", [])
         for v in vulnerabilities:
             severity = v.get("Severity", "UNKNOWN")
-            
-            # Aggregate total counts for our enriched metrics block
+
             if severity == "CRITICAL": critical_count += 1
             elif severity == "HIGH": high_count += 1
             elif severity == "MEDIUM": medium_count += 1
@@ -162,16 +160,14 @@ def build_llm_payload_from_trivy(trivy_results: List[Dict[str, Any]]) -> Dict[st
                     "fixed_version": v.get("FixedVersion", "No Patch Available"),
                     "severity": severity,
                     "title": v.get("Title", "No title metadata available."),
-                    # Apply our optimized text truncation method here
                     "description": clean_truncate_description(v.get("Description", ""))
                 }
                 priority_findings.append(entry)
 
-    # Sort all findings mathematically so CRITICAL and HIGH issues float to the top
+    # Sort so CRITICAL and HIGH issues float to the top
     severity_order = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1}
     priority_findings.sort(key=lambda x: severity_order.get(x["severity"], 0), reverse=True)
 
-    # Compile the final optimized structure
     return {
         "host_node": "production_target_host",
         "risk_summary": {
@@ -181,22 +177,18 @@ def build_llm_payload_from_trivy(trivy_results: List[Dict[str, Any]]) -> Dict[st
             "low_count": low_count,
             "total_actionable": len(priority_findings)
         },
-        # Slice the array down to protect token limitations
         "priority_findings": priority_findings[:10]
     }
 
 def main():
-    # 1. Run the local open-source scanner engine
     raw_scan_data = run_local_trivy_scan()
 
     if not raw_scan_data:
         print("[!] Pipeline aborted. No scan data captured.", file=sys.stderr)
         sys.exit(1)
 
-    # 2. Package and condense the dataset for your LLM context window
     llm_ready_payload = build_llm_payload_from_trivy(raw_scan_data)
 
-    # 3. Output clean, production-grade JSON
     print(json.dumps(llm_ready_payload, indent=2))
 
 

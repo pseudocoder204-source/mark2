@@ -151,7 +151,7 @@ def collect(target: str, label: str, out_path: str, malware_mode: str,
     table = agent.build_findings_table(results)
     order = agent._fallback_order(table)
 
-    # Exactly what run_report() logs: the full findings dicts in deterministic order.
+    # The full findings dicts in deterministic order.
     by_ref = {f["ref"]: f for f in table}
     ordered_facts = [by_ref[r] for r in order if r in by_ref]
 
@@ -164,7 +164,7 @@ def collect(target: str, label: str, out_path: str, malware_mode: str,
 
     record = {
         "ordered_facts": ordered_facts,
-        "raw_output": None,          # gold output is drafted offline (Step 4)
+        "raw_output": None,          # gold output is drafted offline, separately
         "passed_validation": None,
         "logged_at": time.time(),
         "_meta": {

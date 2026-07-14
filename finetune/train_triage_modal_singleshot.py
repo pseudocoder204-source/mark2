@@ -44,10 +44,8 @@ image = (
 )
 
 BASE_MODEL = "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"
-# Re-measured over train_triage_singleshot.jsonl + eval_triage_singleshot.jsonl
-# (Qwen2.5 tokenizer, no tool schema) on 2026-07-12: p50=895, p90=1690,
-# p95=1854, max=4122 (n=303). No inlined lookup_cves tool results here, so
-# this is far shorter than the multi-turn set's 24576.
+# No inlined lookup_cves tool results here, so the token length is far
+# shorter than the multi-turn set's 24576.
 MAX_SEQ_LENGTH = 6144
 OUTPUT_DIR = "/output"
 

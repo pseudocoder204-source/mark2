@@ -33,9 +33,8 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git", "cmake", "build-essential", "curl")
     .pip_install(
-        # Same pinned stack as train_modal.py / eval_modal.py — see
-        # modal_training_issues.md #2 (unpinned installs can drift onto an
-        # incompatible unsloth/trl/transformers combo).
+        # Same pinned stack as train_modal.py / eval_modal.py — unpinned
+        # installs can drift onto an incompatible unsloth/trl/transformers combo.
         "torch==2.10.0",
         "torchvision==0.25.0",
         "torchao==0.17.0",
@@ -64,7 +63,8 @@ MAX_SEQ_LENGTH = 4096
     timeout=3600,
 )
 def export_gguf():
-    # Unsloth must be imported before trl/transformers/peft (modal_training_issues.md #4).
+    # Unsloth must be imported before trl/transformers/peft — its patcher hooks
+    # those modules at import time.
     from unsloth import FastLanguageModel
 
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -74,7 +74,7 @@ def export_gguf():
         load_in_4bit=True,
     )
 
-    # Step 15: merges the LoRA adapter into the base weights (dequantized to fp16
+    # Merges the LoRA adapter into the base weights (dequantized to fp16
     # internally), converts to GGUF via llama.cpp, and quantizes to Q8_0.
     model.save_pretrained_gguf(
         GGUF_OUT_DIR,

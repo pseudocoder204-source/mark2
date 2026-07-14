@@ -27,7 +27,8 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install(
-        # Same pinned stack as train_modal.py — see modal_training_issues.md #2.
+        # Same pinned stack as train_modal.py — unpinned installs can drift onto an
+        # incompatible unsloth/trl/transformers combo.
         "torch==2.10.0",
         "torchvision==0.25.0",
         "torchao==0.17.0",
@@ -52,7 +53,8 @@ ADAPTER_DIR = "/output/report-3b-lora"
 
 @app.function(image=image, gpu="A10G", volumes={"/output": volume}, timeout=1800)
 def generate():
-    # Unsloth must be imported before trl/transformers/peft (modal_training_issues.md #4).
+    # Unsloth must be imported before trl/transformers/peft — its patcher hooks
+    # those modules at import time.
     from unsloth import FastLanguageModel
 
     model, tokenizer = FastLanguageModel.from_pretrained(

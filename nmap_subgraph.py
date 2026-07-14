@@ -176,7 +176,6 @@ def _enrich_node(state: NmapSubgraphState) -> Dict[str, Any]:
 
     print("[nmap/enrich] looking up CVEs...", file=sys.stderr)
     try:
-        # Reconstruct ServiceFinding dataclasses from the serialised dicts
         findings = [
             ServiceFinding(
                 port=d["port"],

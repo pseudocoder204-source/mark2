@@ -257,7 +257,7 @@ def _web_payload(n: int) -> Dict[str, Any]:
 
 # --- Profiles -----------------------------------------------------------------
 # Each profile returns a `results` dict shaped exactly like agent.py's worker spine
-# output (the dict build_findings_table consumes). See FinetuneGuide.txt PHASE 1B.
+# output (the dict build_findings_table consumes).
 
 def _profile_elderly_minimal(conn: sqlite3.Connection) -> Dict[str, Any]:
     network = [_service_record(conn, with_cves=False)]

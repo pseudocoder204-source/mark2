@@ -36,8 +36,8 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install(
         # Pinned to the exact combo validated for the report model
-        # (finetune/requirements.txt / train_modal.py) — see that file's
-        # comment for why unpinned installs are unsafe here.
+        # (finetune/requirements.txt / train_modal.py) — unpinned installs
+        # can drift onto an incompatible unsloth/trl/transformers combo.
         "torch==2.10.0",
         "torchvision==0.25.0",
         "torchao==0.17.0",
@@ -60,19 +60,16 @@ BASE_MODEL = "unsloth/Qwen2.5-3B-Instruct-bnb-4bit"
 # Report model used 4096 (fits a single report completion). Triage examples
 # include inlined lookup_cves tool-result turns (up to 25 CVE records per
 # call, per export_triage_trainset._shrink_tool_content's cap) and can chain
-# up to 3 escalations in one trace. Re-measured p95/max token length over
-# the actual triage_train.jsonl + eval_triage.jsonl (Qwen2.5 tokenizer,
-# chat template incl. tool schema) on 2026-07-11: p50=1255, p90=11227,
-# p95=13904, max=21153 (n=303). Set well above the observed max so no
-# training example gets silently truncated.
+# up to 3 escalations in one trace, so the max token length is much larger.
+# Set well above the measured max so no training example gets silently truncated.
 MAX_SEQ_LENGTH = 24576
 OUTPUT_DIR = "/output"
 
 
 @app.function(image=image, gpu="A100-40GB", volumes={OUTPUT_DIR: volume}, timeout=14400)
 def train():
-    # Unsloth must be imported before trl/transformers/peft — see
-    # train_modal.py's comment; same import-order requirement applies here.
+    # Unsloth must be imported before trl/transformers/peft — its patcher
+    # hooks those modules at import time (same requirement as train_modal.py).
     from unsloth import FastLanguageModel
     from unsloth.chat_templates import train_on_responses_only
     from datasets import load_dataset
@@ -85,7 +82,7 @@ def train():
         load_in_4bit=True,
     )
 
-    # Same r=16 config as the report model (Step 9: "config carries over").
+    # Same r=16 config as the report model.
     model = FastLanguageModel.get_peft_model(
         model,
         r=16,
@@ -138,12 +135,12 @@ def train():
         gradient_accumulation_steps=8,
         # Explicit (default is 8, not train's batch_size=1): a single
         # longest-eval-example forward pass materializes a
-        # seq_len * vocab_size fp32 logits tensor (~19.6GiB for the ~21K
-        # token max in this corpus) — eval_batch_size>1 stacks that per
-        # extra sequence and blew through the A10G's 22GB (Step 10, first
-        # attempt: OOM at the first epoch-end eval after training itself
-        # completed cleanly). Pinning both to 1 keeps memory to one
-        # sequence's worth at a time.
+        # seq_len * vocab_size fp32 logits tensor that's already large at
+        # this corpus's max token length — eval_batch_size>1 stacks that per
+        # extra sequence and blows through the GPU's memory (hit in practice:
+        # OOM at the first epoch-end eval after training itself completed
+        # cleanly). Pinning both to 1 keeps memory to one sequence's worth
+        # at a time.
         per_device_eval_batch_size=1,
         eval_accumulation_steps=1,
         num_train_epochs=3,
@@ -175,13 +172,12 @@ def train():
 
     # Mask system/user turns (script_findings-stripped table + tool results,
     # which render as a "user" role wrapped in <tool_response>...</tool_response>
-    # per Qwen2.5's chat template — confirmed against a live
-    # apply_chat_template render on 2026-07-11) so loss is computed only on
-    # assistant turns. Because EVERY assistant turn (tool_call turns AND the
-    # final {"priority_order": [...]} turn) is delimited by the same
+    # per Qwen2.5's chat template) so loss is computed only on assistant turns.
+    # Because EVERY assistant turn (tool_call turns AND the final
+    # {"priority_order": [...]} turn) is delimited by the same
     # "<|im_start|>assistant\n" marker, this single instruction/response pair
     # unmasks both — the model must learn to produce the tool calls, not just
-    # the final answer (Step 9 requirement).
+    # the final answer.
     trainer = train_on_responses_only(
         trainer,
         instruction_part="<|im_start|>user\n",

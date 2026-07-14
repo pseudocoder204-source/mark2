@@ -80,7 +80,7 @@ def draft_triage_label(table: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {"trace": [{"role": "assistant", "content": final_text}],
                 "final_text": final_text, "escalated_cpes": [], "escalations_used": 0}
 
-    # Step 4a: present findings in ref-ascending ("original ref") order, never the gold order.
+    # Present findings in ref-ascending ("original ref") order, never the gold order.
     presentation = sorted(table, key=lambda f: f["ref"])
 
     tiers_present = sorted({f["severity"] for f in presentation},

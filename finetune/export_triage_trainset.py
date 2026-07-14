@@ -69,9 +69,9 @@ def _load_validated(db_path: str):
 
 
 def _compact_user_content(table):
-    # Step 4a: ref-ascending presentation order, script_findings stripped —
-    # must match label_triage_batch.draft_triage_label's `presentation` exactly,
-    # since triage_label's gold trace was drafted against this exact ordering.
+    # Ref-ascending presentation order, script_findings stripped — must match
+    # label_triage_batch.draft_triage_label's `presentation` exactly, since
+    # triage_label's gold trace was drafted against this exact ordering.
     presentation = sorted(table, key=lambda f: f["ref"])
     compact = [{k: v for k, v in f.items() if k != "script_findings"} for f in presentation]
     return json.dumps(compact)
@@ -136,9 +136,9 @@ def _trace_to_messages(trace):
 
 def _build_messages(table, triage_label):
     # run_triage short-circuits to [] before sending anything to the LLM when
-    # table is empty (agent.py:391-392), but Step 6 wants the empty shape
-    # trained anyway ("so the shape is seen") — include the user turn with
-    # what WOULD be sent ("[]") so the record still looks like a real turn.
+    # table is empty, but the empty shape should still be trained on ("so the
+    # shape is seen") — include the user turn with what WOULD be sent ("[]")
+    # so the record still looks like a real turn.
     messages = [
         {"role": "system", "content": _TRIAGE_SYSTEM_PROMPT.format(budget=_MAX_ESCALATIONS)},
         {"role": "user", "content": _compact_user_content(table)},
@@ -186,7 +186,7 @@ def _stratify_split(rows, eval_frac: float, seed: int):
     for key in sorted(groups):
         group_rows = groups[key][:]
         # Keep byte-identical ordered_facts together on one side of the split,
-        # same reasoning as export_trainset.py:74-77.
+        # same reasoning as export_trainset.py's stratified split.
         by_facts = defaultdict(list)
         for row in group_rows:
             by_facts[row[3]].append(row)

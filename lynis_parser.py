@@ -165,7 +165,6 @@ def build_llm_payload_from_lynis(parsed_report: Dict[str, Any]) -> Dict[str, Any
             "solution":    clean_truncate_description(s["solution"]),
         })
 
-    # Sort so HIGH warnings float above MEDIUM suggestions
     priority_findings.sort(
         key=lambda x: _SEVERITY_ORDER.get(x["severity"], 0),
         reverse=True,

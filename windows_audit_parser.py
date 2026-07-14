@@ -245,7 +245,6 @@ def _evaluate_findings(facts: Dict[str, Any], elevated: bool) -> List[Dict[str, 
     elif rtp is False:
         out.append(_finding("DEFENDER-RTP", "HIGH"))
 
-    # Firewall per profile
     for profile, tid in (("firewall_domain", "FIREWALL-DOMAIN"),
                          ("firewall_private", "FIREWALL-PRIVATE"),
                          ("firewall_public", "FIREWALL-PUBLIC")):
@@ -286,16 +285,13 @@ def _evaluate_findings(facts: Dict[str, Any], elevated: bool) -> List[Dict[str, 
     if au is not None and au in (0, 1):
         out.append(_finding("WU-AUTOUPDATE", "HIGH"))
 
-    # Stale patches: >30 days since last hotfix
     days = facts.get("days_since_update")
     if isinstance(days, int) and days > 30:
         out.append(_finding("WU-STALE", "MEDIUM", extra=f"last update {days} days ago"))
 
-    # Guest account enabled
     if facts.get("guest_enabled") is True:
         out.append(_finding("GUEST-ENABLED", "MEDIUM"))
 
-    # PowerShell execution policy
     policy = str(facts.get("exec_policy", "")).lower()
     if policy in ("unrestricted", "bypass"):
         out.append(_finding("PS-EXECPOLICY", "MEDIUM", extra=f"currently '{facts.get('exec_policy')}'"))

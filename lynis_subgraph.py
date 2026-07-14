@@ -51,9 +51,9 @@ from lynis_parser import (
 # Original text, not copied from Lynis. Keep it that way: Lynis is GPL-3.0 and this
 # project is GPL-2.0-only, so pasting upstream text in here would be a license conflict.
 #
-# PROVENANCE — verified 2026-07-10 against all 43 include/tests_* files in
-# CISOfy/lynis@master. For each ID, the `Register --test-no ...` line and every
-# ReportWarning/ReportSuggestion call in its block were read directly.
+# PROVENANCE — verified against upstream Lynis's include/tests_* files. For each ID,
+# the `Register --test-no ...` line and every ReportWarning/ReportSuggestion call in
+# its block were read directly.
 #
 # Only warning[] and suggestion[] lines in the report file ever reach
 # `priority_findings` (see lynis_parser.build_llm_payload_from_lynis). So a catalog
@@ -61,24 +61,16 @@ from lynis_parser import (
 # ReportSuggestion, and its `description` must state *the condition that was found*,
 # not what the test looks at — it is rendered to the user as a finding.
 #
-# 17 IDs were removed on 2026-07-10 because they can never appear in a report:
-#   - 15 register normally but only ever LogText/Display/AddHP, never
-#     ReportWarning/ReportSuggestion: AUTH-9234, AUTH-9252, AUTH-9266, AUTH-9268,
-#     CONT-8004, CONT-8102, CRYP-7930, CRYP-8002, FILE-6374, MACF-6290, MALW-3280,
-#     SHLL-6220, SHLL-6230, SSH-7440, TOOL-5102.
-#   - 2 have no `Register` call at all — they exist only as commented-out placeholder
-#     headers upstream: LDAP-2240, LDAP-2244.
-# Keeping them meant synth_findings.py fabricated host_audit findings that the real
-# pipeline can never emit (e.g. CONT-8004, a Solaris-zone inventory query, surfacing
-# as a HIGH finding on a Linux laptop).
+# IDs that can never appear in a report were deliberately left out of this catalog:
+# some register normally but only ever call LogText/Display/AddHP, never
+# ReportWarning/ReportSuggestion; a couple have no `Register` call at all upstream
+# (commented-out placeholder headers). Including those would let a finding surface
+# for a check the real pipeline can never actually emit.
 #
-# SSH-7408 *does* exist upstream (include/tests_ssh) — an earlier revision of this note
-# wrongly flagged it as nonexistent.
-#
-# These strings reach end users via enrich_node and seed synth_findings.py's training
-# rows, so a wrong mapping is a wrong report and a poisoned training example.
-# Before adding an entry: confirm the ID calls ReportWarning/ReportSuggestion upstream,
-# and phrase `description` as the detected condition, in the same voice as its neighbours.
+# These strings reach end users directly via enrich_node, so a wrong mapping becomes
+# a wrong report. Before adding an entry: confirm the ID calls ReportWarning/
+# ReportSuggestion upstream, and phrase `description` as the detected condition, in
+# the same voice as its neighbours.
 
 LYNIS_TEST_CATALOG: Dict[str, Dict[str, str]] = {
     # ── AUTH — Authentication ──────────────────────────────────────────────────

@@ -351,9 +351,8 @@ def _summarize_overall(n_issues: int, worst_tier_rank: int, total_ok: int) -> st
 
 # Shared severity->urgency clause, appended after a source-specific "why" sentence
 # rather than standing in for it alone — severity alone was the whole reason both
-# Trivy and Lynis translations used to collapse to 2-3 near-identical why_it_matters
-# strings project-wide (verified: 296 host_audit training rows had only 2 distinct
-# why_it_matters values, 205 filesystem rows had only 3).
+# Trivy and Lynis translations used to collapse to just a handful of
+# near-identical why_it_matters strings project-wide.
 _SEVERITY_URGENCY_CLAUSE = {
     "critical": "It's rated urgent — worth fixing as soon as possible.",
     "high": "It's worth fixing soon.",
@@ -363,9 +362,9 @@ _DEFAULT_URGENCY_CLAUSE = "It's worth addressing to keep this device on the safe
 
 
 # --- Trivy (filesystem) translations: procedural by package, since the CVE-bearing
-# `description` Trivy hands us (see synth_findings.py::_filesystem_payload) literally
-# embeds the raw CVE ID — that text must never be echoed into report output, only
-# `package`/`installed_version`/`fixed_version` (all CVE-literal-free) are used here.
+# `description` Trivy hands us literally embeds the raw CVE ID — that text must
+# never be echoed into report output, only `package`/`installed_version`/
+# `fixed_version` (all CVE-literal-free) are used here.
 _PACKAGE_INFO = {
     "openssl": ("OpenSSL", "the encryption software used to secure network connections"),
     "curl": ("curl", "a tool other installed programs use to fetch data from the internet"),
@@ -460,10 +459,9 @@ _LYNIS_CATEGORY_INTRO = {
 }
 
 # What could actually happen if each category's setting is left as-is — this is what
-# was missing before: why_it_matters used to be picked from severity alone (2 strings
-# total across all 28 categories), so e.g. an SSH gap and a printing gap read
-# identically. Content now tracks the category; urgency still tracks severity
-# (appended separately below).
+# was missing before: why_it_matters used to be picked from severity alone, so e.g.
+# an SSH gap and a printing gap read identically. Content now tracks the category;
+# urgency still tracks severity (appended separately below).
 _LYNIS_CATEGORY_WHY = {
     "Authentication": "A weak spot here could make it easier for someone to guess or brute-force their way into an account.",
     "Boot": "Someone with physical access to the device could use this to bypass normal login protections entirely.",

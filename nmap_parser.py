@@ -37,8 +37,8 @@ class ScanType(Enum):
     # parses these to surface live progress instead of going silent until completion.
     # -T4 + --min-rate tune nmap's default conservative T3 timing/adaptive send-rate for
     # trusted local/home-network scanning, where WAN-safe stealth pacing just adds wait
-    # time (see the "why is version detect slow" investigation) — not appropriate if this
-    # pipeline is ever pointed at a target outside the operator's own network.
+    # time — not appropriate if this pipeline is ever pointed at a target outside the
+    # operator's own network.
     VERSION_DETECT     = ["-sV", "--version-light", "-T4", "--min-rate", "100", "--stats-every", "5s"]
     QUICK_SYN          = ["-sS", "-F", "--open", "-T4", "--min-rate", "100", "--stats-every", "5s"]   # requires NET_RAW capability (root/Docker)
     # Host-discovery only (no port scan) — answers "who's on my network" and gives a

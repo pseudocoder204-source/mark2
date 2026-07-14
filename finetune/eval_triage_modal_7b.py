@@ -153,15 +153,14 @@ def _run_multiturn(model_handle, system_msg, user_msg, tools, table):
             escalations_used += 1
             escalated_cpes.append(cpe)
             # Same cap export_triage_trainset._shrink_tool_content applies at
-            # training time (nmap_parser.fetch_cves_from_local_cache has no
-            # row cap and a contested cpe can return 400-1800+ CVE records,
-            # blowing the context window across a multi-turn conversation).
+            # training time — an uncapped lookup_cves call for a contested cpe
+            # can return far more CVE records than fit in the context window.
             result = _shrink_tool_content(lookup_cves.func(cpe))
         messages.append({"role": "tool", "content": result})
         turns_trace.append({"role": "tool", "content": result})
     else:
         # Exhausted the loop budget still emitting tool calls — ask once more,
-        # forcing a final answer, same recovery run_triage applies (agent.py:424-429).
+        # forcing a final answer, same recovery run_triage applies.
         messages.append({
             "role": "user",
             "content": 'Stop calling tools. Respond with ONLY the JSON object '
