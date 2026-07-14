@@ -73,7 +73,8 @@ only scan_log.db and exits without running a scan or the LLM:
 Env vars (all optional):
   TARGET              Scan target          (default: 127.0.0.1)
   LLM_PROVIDER        ollama (default) or claude
-  OLLAMA_MODEL        Ollama model name for the report node (default: llama3.1:8b)
+  OLLAMA_MODEL        Ollama model name for the report node
+                      (default: pseudocoder204/mark2-report; llama3.1:8b also works)
   OLLAMA_HOST         Ollama base URL      (default: http://localhost:11434)
   ANTHROPIC_MODEL     Claude model for the report node (default: claude-opus-4-8)
   NVD_API_KEY   NVD key for faster sync
@@ -110,6 +111,12 @@ from scan_log_db import (
     mark_solved,
     save_scan_log,
 )
+
+# The fine-tuned report model is the default because it is what install.sh/install.ps1
+# pull and what the report prompt/output contract was trained against. Stock
+# llama3.1:8b still works via OLLAMA_MODEL, but it is the fallback, not the happy path.
+DEFAULT_OLLAMA_MODEL = "pseudocoder204/mark2-report"
+DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-8"
 
 # ── Scope gate (pure Python, no LLM) ──────────────────────────────────────────
 
@@ -843,12 +850,12 @@ def _get_llm(model: Optional[str] = None):
     if provider == "ollama":
         from langchain_ollama import ChatOllama
         return ChatOllama(
-            model=model or os.environ.get("OLLAMA_MODEL", "llama3.1:8b"),
+            model=model or os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
             base_url=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
         )
     if provider == "claude":
         from langchain_anthropic import ChatAnthropic
-        return ChatAnthropic(model=model or os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8"))
+        return ChatAnthropic(model=model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL))
     raise ValueError(f"Unknown LLM_PROVIDER={provider!r}. Use 'ollama' or 'claude'.")
 
 
@@ -1366,9 +1373,9 @@ def main() -> None:
 
     provider     = os.environ.get("LLM_PROVIDER", "ollama")
     report_model = (
-        os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
+        os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
         if provider == "ollama"
-        else os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
+        else os.environ.get("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL)
     )
     print(f"[mark2] Target  : {args.target}", file=sys.stderr)
     print(f"[mark2] Backend : {provider} / {report_model}", file=sys.stderr)

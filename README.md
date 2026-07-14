@@ -54,163 +54,232 @@ The scan found 12 issue(s) that need attention out of 14 item(s) reviewed.
  ...
 ```
 
-## Get the code
+## Install
 
-Clone the repository, then move into the new directory it creates before running anything
-else in this guide:
+One command. It installs the scanners, the Python dependencies, Ollama and the report
+model, and the CVE cache — then puts a `pulser` launcher on your `PATH`.
+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pseudocoder204-source/Pulser/main/install.sh | bash
+```
+
+**Windows** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/pseudocoder204-source/Pulser/main/install.ps1 | iex
+```
+
+Then run a diagnostic:
+
+```bash
+pulser                          # scan this machine (127.0.0.1)
+pulser --target 192.168.1.1     # scan something else on your network
+```
+
+That's the whole setup. You don't need to clone anything first, make a virtualenv, export
+any environment variable, or download the CVE cache by hand — the installer does all of it.
+Re-running the same command later **upgrades** an existing install instead of reinstalling it.
+
+**It will take a while, and most of that is two big downloads:** the report model (multi-GB,
+from Ollama) and the CVE cache (~126 MB compressed, ~3.2 GB unpacked). Both run in the
+background while the scanners install, so they overlap rather than queue. Everything else is
+quick.
+
+### "You want me to pipe a script from the internet into my shell?"
+
+Fair — and doubly fair for a security tool. Read it first, then run the identical thing from
+a clone:
+
+```bash
+git clone https://github.com/pseudocoder204-source/Pulser.git
+cd Pulser
+less install.sh          # or install.ps1 on Windows — read it
+./install.sh             # byte-for-byte the same installer the curl form runs
+```
+
+The installer also prints exactly what it's about to do — every directory it will write to,
+every tool it will install — and waits for you to confirm before touching anything.
+
+### Installer options
+
+| Flag (Linux/macOS) | Flag (Windows) | What it does |
+|---|---|---|
+| `--claude` | `-Claude` | You're using the Anthropic backend: skip Ollama and the model pull entirely |
+| `--skip-cache` | `-SkipCache` | Skip the ~3.2 GB CVE cache (CVE enrichment degrades; everything else runs) |
+| `--model NAME` | `-Model NAME` | Pull a different Ollama model (default: `pseudocoder204/mark2-report`) |
+| `--dir PATH` | `-Dir PATH` | Where to install (default: `~/.local/share/pulser`, `%LOCALAPPDATA%\Pulser` on Windows) |
+| `--skip-shim` | `-SkipShim` | Don't put the `pulser` launcher on your `PATH` |
+| `--yes` | `-Yes` | Don't prompt for confirmation |
+
+Pass them through the piped form like this:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pseudocoder204-source/Pulser/main/install.sh | bash -s -- --claude
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/pseudocoder204-source/Pulser/main/install.ps1))) -Claude
+```
+
+### What the installer deliberately will *not* do
+
+- **Bundle any scanner binary.** Every tool comes from your OS package manager or the tool's
+  own upstream release (nmap from your distro/`winget`, Trivy and Nuclei from their official
+  installers), so Pulser redistributes nothing. See
+  [Licensing and Attributions](#license--attributions).
+- **Install Npcap** (Windows LAN scans) — its license forbids redistribution, so `install.ps1`
+  only detects it and links to [npcap.com](https://npcap.com/#download). You install it yourself.
+- **Elevate.** On Windows, run Pulser as Administrator for the elevation-gated audit checks
+  and raw-socket nmap scans; the installer won't do that for you.
+
+> **macOS:** while `brew` installs Lynis, you may see a system prompt like *"Terminal would
+> like to access files in your Documents folder."* That's macOS's own privacy protection
+> (TCC) reacting to Lynis's post-install step touching your home directory — the installer
+> itself never runs Lynis, it only installs the binary. It's safe to click **Allow**. You may
+> see a similar prompt again later for real, when you actually run a diagnostic, because
+> Lynis's `audit_host` stage genuinely scans your filesystem for hardening checks — so that
+> one's expected too.
+
+## Requirements
+
+The installer handles all of these except Python itself, but for reference:
+
+- Python 3.10+
+- The scanner binaries for your OS (see [Install the scanners](CONTRIBUTING_SCAN_DATA.md#install-the-scanners))
+- **[Nmap](https://nmap.org/download.html).** Pulser does not ship Nmap for licensing reasons
+  (see [Licensing and Attributions](#license--attributions)); the installer installs it
+  from your package manager. If you install it by hand, make sure it's on `$PATH` — or point
+  `NMAP_BINARY` at it. On Windows, LAN scans additionally need
+  [Npcap](https://npcap.com/#download), which you must install yourself.
+- An LLM backend: a local [Ollama](https://ollama.com) model (default) **or** an Anthropic API key
+
+Without Nmap, Pulser still runs: the port/service, CVE-enrichment, and IoT default-credential
+stages report `{"status": "unavailable"}` and the remaining scanners (Trivy, Nuclei, Lynis,
+ClamAV) proceed normally. You lose the network findings, not the run.
+
+## Manual install, step by step
+
+Prefer to do it yourself, or want to know exactly what the installer did? This is the same
+sequence, by hand.
+
+**1. Get the code.**
 
 ```bash
 git clone https://github.com/pseudocoder204-source/Pulser.git
 cd Pulser
 ```
 
-(Prefer SSH? `git clone git@github.com:pseudocoder204-source/Pulser.git` works the same
-way.) Every command below (`install.sh`/`install.ps1`, `pip install`, `python3 agent.py`,
-`docker build`) assumes you're running it from inside that `Pulser/` directory.
+(Prefer SSH? `git clone git@github.com:pseudocoder204-source/Pulser.git` works the same way.)
+Every command below assumes you're inside that `Pulser/` directory.
 
-## Requirements
+**2. Install the scanners** — nmap, ClamAV, Lynis, Trivy, and Nuclei on Linux/macOS; only
+nmap and Nuclei on Windows (Lynis, ClamAV, and Trivy aren't used there — see
+[Cross-platform support](CLAUDE.md#cross-platform-windows-support)). Per-tool commands are in
+[Install the scanners](CONTRIBUTING_SCAN_DATA.md#install-the-scanners).
 
-- Python 3.10+
-- The scanner binaries for your OS (see [Install the scanners](CONTRIBUTING_SCAN_DATA.md#install-the-scanners))
-- **[Nmap](https://nmap.org/download.html), installed by you.** Pulser does not ship Nmap
-  for licensing reasons (see [Licensing and Attributions](#licensing-and-attributions)).
-  Install it from your package manager (`apt install nmap`, `brew install nmap`,
-  `apk add nmap nmap-scripts`) or nmap.org, and make sure it is on `$PATH` — or point
-  `NMAP_BINARY` at it. On Windows, LAN scans additionally need
-  [Npcap](https://npcap.com/#download), also installed by you.
-- An LLM backend: a local [Ollama](https://ollama.com) model (default, see
-  [Setting up Ollama](#setting-up-ollama) below) **or** an Anthropic API key
-
-Without Nmap, Pulser still runs: the port/service, CVE-enrichment, and IoT default-credential
-stages report `{"status": "unavailable"}` and the remaining scanners (Trivy, Nuclei, Lynis,
-ClamAV) proceed normally. You lose the network findings, not the run.
-
-## Quick install
-
-An installer script provisions the scanner tools and the Python dependencies in one shot. It
-**installs** the tools rather than bundling them to avoid licensing issues. Every tool comes from your OS package manager or the tool's own
-upstream release (nmap from your distro/`winget`, Trivy and Nuclei from their official
-installers), so Pulser redistributes nothing. It's idempotent: anything already present is
-skipped.
-
-**Linux / macOS:**
+**3. Create a virtualenv and install the Python dependencies.** Use a venv — on most current
+Linux distros a bare `pip install` fails outright with `externally-managed-environment`
+(PEP 668).
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate   # recommended
-./install.sh
-```
-
-> **macOS:** while `brew install`s Lynis, you may see a system prompt like *"Terminal would
-> like to access files in your Documents folder."* That's macOS's own privacy protection
-> (TCC) reacting to Lynis's post-install step touching your home directory — `install.sh`
-> itself never runs Lynis, it only installs the binary. It's safe to click **Allow**. You may
-> see a similar prompt again later for real, when you actually run a diagnostic because Lynis's
-> `audit_host` stage genuinely scans your filesystem for hardening checks, so that one's
-> expected too.
-
-**Windows** (PowerShell):
-
-```powershell
-python -m venv .venv; .\.venv\Scripts\Activate.ps1   # recommended
-.\install.ps1
-```
-
-The script prints a summary of what it installed and what you must still do yourself. It
-deliberately does **not** touch three things:
-
-- **Ollama itself, or any Ollama model** — the script only checks whether `ollama` is on
-  `PATH` and tells you where to get it if not. It never pulls a model: `llama3.1:8b` and the
-  fine-tuned `mark2-report` are both multi-gigabyte downloads, and which one you want (or
-  whether you're using Claude instead) is your call, not something worth blocking `install.sh`
-  on. See [Setting up Ollama](#setting-up-ollama) below.
-- **Npcap** (Windows LAN scans) — its license forbids redistribution, so `install.ps1` only
-  detects it and links to [npcap.com](https://npcap.com/#download); you install it yourself.
-- **The CVE cache** (~3.2 GB) — download it from Releases (see [The CVE cache](#the-cve-cache)).
-
-Prefer to do it by hand? Everything the script does is spelled out below — install the
-scanners ([Install the scanners](CONTRIBUTING_SCAN_DATA.md#install-the-scanners)), then:
-
-```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-## Setting up Ollama
+**4. Set up Ollama.** Pulser has a single LLM stage — **report**, which writes the
+plain-English report. Triage (ordering findings by priority) is deterministic Python
+(`priority.rank`), not an LLM call, so no LLM is invoked for it.
 
-Pulser has a single LLM stage: **report** (writes the plain-English report). Triage
-(ordering findings by priority) is deterministic Python (`priority.rank`), not an LLM
-call, so no LLM is invoked for it.
+Install Ollama from [ollama.com/download](https://ollama.com/download) and make sure it's
+running (`ollama serve`, or just launch the app — it starts a background service
+automatically on macOS/Windows). Then pull a model:
 
-Neither [Quick install](#quick-install) nor `install.sh`/`install.ps1` pulls an Ollama model
-for you — both are multi-gigabyte downloads, and picking one is up to you, not something to
-wait on during setup. Pick one of these:
+```bash
+ollama pull pseudocoder204/mark2-report     # the default
+```
 
-- **`pseudocoder204/mark2-report`** (recommended) — a fine-tuned model trained on the report
-  stage's actual prompt/output contract; produces better home-user-facing reports than the
-  stock model at the same size.
-- **`llama3.1:8b`** (stock) — pick this if you'd rather stay on an untuned, more widely-used
-  base model, or if you're already using it for something else and don't want a second
-  multi-GB pull.
+`pseudocoder204/mark2-report` is fine-tuned on the report stage's actual prompt/output
+contract and produces better home-user-facing reports than the stock model at the same size.
+It's what `agent.py` uses unless you say otherwise. To use a stock base model instead, pull it
+and point `OLLAMA_MODEL` at it:
 
-1. **Install Ollama** — see [ollama.com/download](https://ollama.com/download) for
-   macOS/Windows/Linux instructions. Make sure it's running (`ollama serve`, or just
-   launch the app — it starts a background service automatically on macOS/Windows).
+```bash
+ollama pull llama3.1:8b
+export OLLAMA_MODEL=llama3.1:8b
+```
 
-2. **Pull a model** (pick one from above):
+Using Anthropic instead of a local model? Skip this step entirely and set `LLM_PROVIDER=claude`
+and `ANTHROPIC_API_KEY` when you run.
 
-   ```bash
-   ollama pull "pseudocoder204/mark2-report"        # recommended
-   # or
-   ollama pull llama3.1:8b                          # stock
-   ```
+**5. Download the CVE cache.** CVE enrichment reads a local SQLite cache,
+`vulnerability_cache.db`. It's ~3.2 GB, so it isn't in the repo — grab the compressed copy
+(~126 MB) and unpack it into the repo root:
 
-3. **Point the report stage at it** (only needed for `mark2-report` — `llama3.1:8b` is
-   already the default if `OLLAMA_MODEL` is unset):
+```bash
+curl -fL -o vulnerability_cache.db.gz \
+  https://github.com/pseudocoder204-source/Pulser/releases/download/v0.1.0-data/vulnerability_cache.db.gz
+gunzip -c vulnerability_cache.db.gz > vulnerability_cache.db
+```
 
-   ```bash
-   export OLLAMA_MODEL=pseudocoder204/mark2-report
-   ```
+On Windows, see [The CVE cache](#the-cve-cache) below for the PowerShell equivalent (`gunzip`
+isn't available there by default).
+
+**6. Run it.**
+
+```bash
+python3 agent.py --target 127.0.0.1
+```
 
 ## Running a diagnostic
+
+If you used the installer, `pulser` is on your `PATH` and works from any directory — no
+`cd` into the repo, no virtualenv to activate:
+
+```bash
+pulser                          # scan this machine (default target 127.0.0.1)
+pulser --target 192.168.1.1     # scan something else
+pulser --json > report.json     # machine-readable output
+```
+
+`pulser` is a thin launcher around `agent.py` and forwards every argument to it, so anything
+below works with either spelling. From a manual install, run `python3 agent.py` (Windows:
+`python agent.py`) from inside the repo with your venv active.
+
+The report stage uses `pseudocoder204/mark2-report` by default — the model the installer
+pulls. To point it at a different one:
 
 **Linux / macOS:**
 
 ```bash
-# Scan your own machine (default target 127.0.0.1) with the default Ollama backend
-# (stock llama3.1:8b for the report stage)
-python3 agent.py [--target IP]
-
-# Use the fine-tuned mark2-report model for the report stage instead of stock
-# llama3.1:8b (after pulling it — see [Setting up Ollama](#setting-up-ollama)):
-OLLAMA_MODEL=pseudocoder204/mark2-report python3 agent.py [--target IP]
+# Use a stock base model for the report stage instead (after `ollama pull llama3.1:8b`)
+OLLAMA_MODEL=llama3.1:8b pulser --target IP
 
 # Use Anthropic instead of Ollama
-LLM_PROVIDER=claude ANTHROPIC_API_KEY=sk-... python3 agent.py
+LLM_PROVIDER=claude ANTHROPIC_API_KEY=sk-... pulser
 ```
 
 **Windows** (PowerShell — inline `VAR=value` prefixes like the bash examples above aren't
-valid syntax; set the environment variable first, then run the script):
+valid syntax; set the environment variable first, then run):
 
 ```powershell
-# Scan your own machine (default target 127.0.0.1) with the default Ollama backend
-# (stock llama3.1:8b for the report stage)
-python agent.py --target IP
-
-# Use the fine-tuned mark2-report model for the report stage instead of stock
-# llama3.1:8b (after pulling it — see [Setting up Ollama](#setting-up-ollama)):
-$env:OLLAMA_MODEL = "pseudocoder204/mark2-report"
-python agent.py --target IP
+# Use a stock base model for the report stage instead (after `ollama pull llama3.1:8b`)
+$env:OLLAMA_MODEL = "llama3.1:8b"
+pulser --target IP
 
 # Use Anthropic instead of Ollama
 $env:LLM_PROVIDER = "claude"
 $env:ANTHROPIC_API_KEY = "sk-..."
-python agent.py
+pulser
 ```
 
 Both the LLM-generated report and everything under it are produced either way — `--json`
 only changes how the *same* output is printed. Without it, the report is rendered as
 human-readable text for a person to read in the terminal. With it, the identical report
 object (`overall_risk`, `summary`, `findings[]`, `good_news[]`) is printed as raw JSON
-instead, e.g. `python3 agent.py --json > report.json`. Only pass `--json` when the caller
+instead, e.g. `pulser --json > report.json`. Only pass `--json` when the caller
 wants machine-readable output (piping into another program) rather than a human-readable
 report — it's not needed for normal interactive use, which is why it's omitted from the
 examples above.
@@ -233,9 +302,12 @@ python3 clamav_subgraph.py
 
 ### The CVE cache
 
-CVE enrichment reads a local SQLite cache, `vulnerability_cache.db`. It's **~3.2 GB**, so
-it is **not** in the repo — download the compressed copy (~126 MB) from the Releases page
-and unpack it into the repo root:
+CVE enrichment reads a local SQLite cache, `vulnerability_cache.db`. It's **~3.2 GB**, so it
+is **not** in the repo.
+
+**The installer downloads and unpacks this for you** — you only need this section if you
+installed manually, passed `--skip-cache`, or want to refresh the cache by hand. Grab the
+compressed copy (~126 MB) from the Releases page and unpack it into the repo root:
 
 **Linux / macOS:**
 
@@ -280,7 +352,7 @@ docker run --rm --network host -e TARGET=192.168.1.1 mark2
 ```
 
 The default image **does not contain Nmap** (see
-[Licensing and Attributions](#licensing-and-attributions)), so the network-scan stages
+[Licensing and Attributions](#license--attributions)), so the network-scan stages
 report `unavailable`. To get them back, build an image with Nmap included **for your own
 local use**:
 

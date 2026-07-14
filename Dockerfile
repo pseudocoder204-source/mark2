@@ -72,7 +72,9 @@ ENV TARGET=127.0.0.1
 # NVD_API_KEY is intentionally left unset here — pass it at `docker run -e NVD_API_KEY=...`
 # time. Never bake a real key into the image; without one, NVD sync just rate-limits harder.
 ENV LLM_PROVIDER=ollama
-ENV OLLAMA_MODEL=llama3.1
+# Matches agent.DEFAULT_OLLAMA_MODEL. Ollama runs on the host, so the host must have
+# pulled this model (`ollama pull pseudocoder204/mark2-report`) for the report stage to work.
+ENV OLLAMA_MODEL=pseudocoder204/mark2-report
 # Ollama runs on the HOST, not in this container.
 # Docker Desktop: host.docker.internal works out of the box.
 # Linux (non-Desktop): use --network=host and set OLLAMA_HOST=http://localhost:11434

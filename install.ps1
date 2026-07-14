@@ -1,14 +1,39 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# Pulser native installer for Windows.
+# Pulser one-command installer for Windows.
 #
-# What this does: installs nmap, Nuclei, the Python dependencies, and checks
-# for Ollama. It deliberately does not pull any Ollama model - see the
-# README's "Setting up Ollama" section to pick and pull one. On Windows the
-# host audit uses the native PowerShell audit and malware uses Windows
-# Defender's own threat history, so Lynis and ClamAV are intentionally NOT
-# installed here. Trivy is also NOT installed - its filesystem-scan mode is
-# always skipped on Windows (see below), so Pulser never invokes it there.
+#   irm https://raw.githubusercontent.com/pseudocoder204-source/Pulser/main/install.ps1 | iex
+#
+# or, from a clone:
+#
+#   .\install.ps1
+#
+# Both paths do the same thing. Piped, it clones the repo for you first. To pass
+# flags through the piped form, PowerShell needs the scriptblock spelling:
+#
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/pseudocoder204-source/Pulser/main/install.ps1))) -Claude
+#
+# What this does, in order:
+#   1. clones Pulser (only if it isn't already around this script)
+#   2. installs the scanners Pulser uses on Windows (nmap, Nuclei)
+#   3. creates a .venv and installs the Python dependencies into it
+#   4. installs Ollama and pulls the report model
+#   5. downloads and unpacks the CVE cache (~126 MB compressed, ~3.2 GB on disk)
+#   6. drops a `pulser` launcher on your PATH
+#
+# Steps 4 and 5 are the slow ones and run as background jobs while 2 and 3 proceed.
+# It is idempotent: anything already present is skipped, so re-running it upgrades
+# an existing install rather than reinstalling it.
+#
+# Windows installs a deliberately smaller scanner set than Linux/macOS:
+#   * Lynis  - no Windows port; the native PowerShell audit replaces it.
+#   * ClamAV - not run on Windows (redundant with Defender, risks quarantine);
+#              Defender's own threat history is the malware source instead.
+#   * Trivy  - tools.scan_filesystem() always returns {"status":"skipped"} on
+#              Windows (its fs mode reads Linux package DBs - dpkg/rpm/apk - that
+#              don't exist here; the host audit's Windows Update check covers
+#              OS-patch state instead), so installing it would be wasted bandwidth
+#              for a scanner Pulser will never invoke on this platform.
 #
 # Licensing note (see LICENSING.md): Pulser ships no scanner binaries.
 #   * nmap  - installed via winget if available (from nmap.org's own published
@@ -21,7 +46,21 @@
 #   * Administrator rights are needed for elevation-gated audit checks and
 #             raw-socket nmap scans; this script does not elevate for you.
 
+[CmdletBinding()]
+param(
+    [Alias('SkipOllama')]
+    [switch]$Claude,          # Anthropic backend: skip Ollama and the model pull
+    [switch]$SkipCache,       # skip the ~3.2 GB CVE cache download
+    [switch]$SkipShim,        # don't install the `pulser` launcher onto PATH
+    [switch]$Yes,             # don't prompt for confirmation
+    [string]$Model = "pseudocoder204/mark2-report",
+    [string]$Dir              # where to clone (default: $env:LOCALAPPDATA\Pulser)
+)
+
 $ErrorActionPreference = 'Stop'
+
+$RepoUrl  = "https://github.com/pseudocoder204-source/Pulser.git"
+$CacheUrl = "https://github.com/pseudocoder204-source/Pulser/releases/download/v0.1.0-data/vulnerability_cache.db.gz"
 
 $installed = @()
 $already   = @()
@@ -33,12 +72,154 @@ function Info($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "  [ok] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  [!]  $m" -ForegroundColor Yellow }
 function Failm($m){ Write-Host "  [x]  $m" -ForegroundColor Red }
+function Skipm($m){ Write-Host "  ( )  $m" -ForegroundColor DarkGray }
 
-Info "Pulser Windows installer"
+# --- 0. bootstrap: find or clone the repo ------------------------------------
+# Run from a clone, $PSScriptRoot sits next to agent.py and we use that tree. Piped
+# through iex there is no script on disk ($PSScriptRoot is empty), so clone instead.
+$srcDir = $null
+if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "agent.py"))) {
+    $srcDir = $PSScriptRoot
+}
+if ($srcDir) {
+    $repoDir = $srcDir
+} elseif ($Dir) {
+    $repoDir = $Dir
+} else {
+    $repoDir = Join-Path $env:LOCALAPPDATA "Pulser"
+}
 
 $hasWinget = Have winget
-if (-not $hasWinget) {
-    Warn "winget not found - tools that would install via winget will be listed for manual install."
+
+Write-Host ""
+Info "Pulser Windows installer"
+Write-Host "  This will:"
+if ($srcDir) { Write-Host "    - use the clone at        $repoDir" }
+else         { Write-Host "    - clone Pulser into       $repoDir" }
+Write-Host "    - install scanners        nmap, Nuclei (Lynis/ClamAV/Trivy are not used on Windows)"
+Write-Host "    - create a venv at        $repoDir\.venv"
+if (-not $Claude) { Write-Host "    - install Ollama + pull   $Model (multi-GB)" }
+else              { Skipm "skip Ollama (-Claude)" }
+if (-not $SkipCache) { Write-Host "    - download the CVE cache  ~126 MB compressed -> ~3.2 GB on disk" }
+else                 { Skipm "skip the CVE cache (-SkipCache)" }
+if (-not $SkipShim) { Write-Host "    - install the launcher    $env:LOCALAPPDATA\Programs\Pulser\pulser.cmd" }
+Write-Host ""
+if (-not $Yes) {
+    $reply = Read-Host "Proceed? [Y/n]"
+    if ($reply -match '^[nN]') { Warn "Aborted."; exit 1 }
+}
+Write-Host ""
+
+if (-not $srcDir) {
+    if (Test-Path (Join-Path $repoDir ".git")) {
+        Info "Updating existing clone at $repoDir"
+        try { git -C $repoDir pull --ff-only | Out-Null; Ok "Updated" }
+        catch { Warn "Could not fast-forward - leaving as-is" }
+        $already += "Pulser clone"
+    } else {
+        if (-not (Have git)) { Failm "git not found - install Git for Windows first (https://git-scm.com)"; exit 1 }
+        Info "Cloning Pulser into $repoDir"
+        try {
+            git clone --depth 1 $RepoUrl $repoDir | Out-Null
+            Ok "Cloned"; $installed += "Pulser clone"
+        } catch {
+            Failm "Clone failed - check your network or clone manually from $RepoUrl"; exit 1
+        }
+    }
+}
+
+# --- background job 1: the CVE cache -----------------------------------------
+# Kicked off first: it's the longest pole (126 MB down, 3.2 GB decompressed) and
+# it's pure network+disk, so it overlaps cleanly with the installs below.
+$cacheDb  = Join-Path $repoDir "vulnerability_cache.db"
+$cacheJob = $null
+if ($SkipCache) {
+    Skipm "CVE cache skipped (-SkipCache)"
+} elseif (Test-Path $cacheDb) {
+    Ok "CVE cache already present"; $already += "CVE cache"
+} else {
+    Info "Downloading the CVE cache in the background (~126 MB -> ~3.2 GB)"
+    $cacheJob = Start-Job -ArgumentList $CacheUrl, $cacheDb -ScriptBlock {
+        param($url, $db)
+        $ErrorActionPreference = 'Stop'
+        $gz = "$db.gz"
+        # Invoke-WebRequest's progress bar makes large downloads crawl; suppressing it
+        # is worth roughly an order of magnitude here.
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest $url -OutFile $gz
+        # Windows PowerShell 5.1 doesn't load System.IO.Compression by default
+        # (PowerShell Core does) - without this, GzipStream fails with
+        # "Cannot find type [System.IO.Compression.GzipStream]".
+        Add-Type -AssemblyName System.IO.Compression
+        $in   = [System.IO.File]::OpenRead($gz)
+        $gzs  = New-Object System.IO.Compression.GzipStream($in, [System.IO.Compression.CompressionMode]::Decompress)
+        # Decompress to .part, then move: a killed run never leaves a half-written DB
+        # that later looks like a valid cache.
+        $out  = [System.IO.File]::Create("$db.part")
+        try   { $gzs.CopyTo($out) }
+        finally { $out.Close(); $gzs.Close(); $in.Close() }
+        Move-Item "$db.part" $db -Force
+        Remove-Item $gz -Force
+    }
+}
+
+# --- background job 2: Ollama + the report model ------------------------------
+$ollamaJob = $null
+if ($Claude) {
+    Skipm "Ollama skipped (-Claude) - set ANTHROPIC_API_KEY and LLM_PROVIDER=claude"
+} else {
+    if (Have ollama) {
+        Ok "Ollama already installed"; $already += "Ollama"
+    } elseif ($hasWinget) {
+        Info "Installing Ollama via winget"
+        try {
+            winget install --id Ollama.Ollama --accept-package-agreements --accept-source-agreements -e | Out-Null
+            # winget updates the machine PATH but not this already-running process's
+            # copy of it, so a freshly installed ollama.exe is invisible to Have until
+            # we re-read PATH from the registry.
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
+                        [System.Environment]::GetEnvironmentVariable("PATH","User")
+            if (Have ollama) { Ok "Ollama installed"; $installed += "Ollama" }
+            else { Warn "Ollama installed but not on PATH yet - reopen your shell"; $installed += "Ollama" }
+        } catch {
+            Failm "winget could not install Ollama"; $manual += "Ollama - https://ollama.com/download"
+        }
+    } else {
+        $manual += "Ollama - https://ollama.com/download"
+    }
+
+    if (Have ollama) {
+        # The Windows installer starts the server as a background service, but not
+        # always instantly - `ollama pull` needs a live server on :11434.
+        $up = $false
+        foreach ($_i in 1..30) {
+            try { Invoke-WebRequest "http://localhost:11434/api/version" -UseBasicParsing -TimeoutSec 2 | Out-Null; $up = $true; break }
+            catch { Start-Sleep -Seconds 1 }
+        }
+        if (-not $up) {
+            Info "Starting the Ollama server"
+            Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
+            foreach ($_i in 1..30) {
+                try { Invoke-WebRequest "http://localhost:11434/api/version" -UseBasicParsing -TimeoutSec 2 | Out-Null; $up = $true; break }
+                catch { Start-Sleep -Seconds 1 }
+            }
+        }
+        if ($up) {
+            if ((ollama list 2>$null | Out-String) -match [regex]::Escape($Model)) {
+                Ok "Model $Model already pulled"; $already += "model $Model"
+            } else {
+                Info "Pulling $Model in the background (multi-GB - this is the slow part)"
+                $ollamaJob = Start-Job -ArgumentList $Model -ScriptBlock {
+                    param($m)
+                    & ollama pull $m 2>&1 | Out-String
+                    if ($LASTEXITCODE -ne 0) { throw "ollama pull failed with exit code $LASTEXITCODE" }
+                }
+            }
+        } else {
+            Warn "Ollama server didn't come up on :11434 - pull the model yourself later"
+            $manual += "ollama pull $Model"
+        }
+    }
 }
 
 # --- 1. nmap (via winget only - never bundled) --------------------------------
@@ -54,39 +235,35 @@ if (Have nmap) {
         Failm "winget could not install nmap"; $manual += "nmap - download from https://nmap.org/download.html"
     }
 } else {
+    Warn "winget not found - nmap must be installed by hand"
     $manual += "nmap - download from https://nmap.org/download.html"
 }
 
 # --- 2. Npcap - DETECT AND LINK ONLY (never downloaded; license forbids it) ---
-$npcapPresent = Test-Path "$env:SystemRoot\System32\Npcap"
-if ($npcapPresent) {
+if (Test-Path "$env:SystemRoot\System32\Npcap") {
     Ok "Npcap detected (nmap LAN scans available)"
 } else {
     Warn "Npcap NOT detected. LAN discovery/SYN/OS-detection scans need it."
     $manual += "Npcap - install yourself from https://npcap.com/#download (Pulser cannot redistribute it)"
 }
 
-# --- 3. Nuclei (Windows binary from upstream) ----------------------------------
-# Trivy is deliberately NOT installed here: tools.scan_filesystem() always
-# returns {"status":"skipped"} on Windows (its fs mode reads Linux package DBs
-# - dpkg/rpm/apk - that don't exist on Windows; host audit's Windows Update
-# check covers OS-patch state instead), so installing it would just be wasted
-# time/bandwidth for a scanner Pulser will never invoke on this platform.
-$binDir = if ($env:MARK2_BIN_DIR) { $env:MARK2_BIN_DIR } else { Join-Path $PSScriptRoot "bin" }
+# --- 3. Nuclei (Windows binary from upstream) ---------------------------------
+$binDir = if ($env:MARK2_BIN_DIR) { $env:MARK2_BIN_DIR } else { Join-Path $repoDir "bin" }
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-
-Info "Skipping Trivy on purpose: its filesystem scan needs Linux package DBs (dpkg/rpm/apk) that don't exist on Windows -- the host audit's Windows Update check covers OS-patch state instead."
 
 if (Have nuclei) {
     Ok "Nuclei already installed"; $already += "Nuclei"
+} elseif (Test-Path (Join-Path $binDir "nuclei.exe")) {
+    Ok "Nuclei already present in $binDir"; $already += "Nuclei"
 } else {
-    Info "Installing Nuclei (Windows amd64) from upstream into $binDir"
+    Info "Installing Nuclei (Windows) from upstream into $binDir"
     try {
         $arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
         $rel  = Invoke-RestMethod "https://api.github.com/repos/projectdiscovery/nuclei/releases/latest"
         $ver  = $rel.tag_name.TrimStart('v')
         $url  = "https://github.com/projectdiscovery/nuclei/releases/download/v$ver/nuclei_${ver}_windows_${arch}.zip"
         $zip  = Join-Path $env:TEMP "pulser-nuclei.zip"
+        $ProgressPreference = 'SilentlyContinue'
         Invoke-WebRequest $url -OutFile $zip
         Expand-Archive $zip -DestinationPath $binDir -Force
         Remove-Item $zip
@@ -98,41 +275,99 @@ if (Have nuclei) {
     }
 }
 
-# --- 4. Python dependencies -----------------------------------------------
+# --- 4. Python venv + dependencies -------------------------------------------
+# The installer owns the venv rather than asking the user to create one first, so
+# nothing is ever installed into the system interpreter.
+$venv   = Join-Path $repoDir ".venv"
+$venvPy = Join-Path $venv "Scripts\python.exe"
 if (Have python) {
-    Info "Installing Python dependencies (requirements.txt)"
-    try { python -m pip install -r (Join-Path $PSScriptRoot "requirements.txt") | Out-Null
-          Ok "Python dependencies installed"; $installed += "Python deps" }
-    catch { Warn "pip install failed - try it inside a venv"; $missing += "Python deps" }
+    if (-not (Test-Path $venvPy)) {
+        Info "Creating a virtualenv at $venv"
+        try { python -m venv $venv | Out-Null } catch { Failm "venv creation failed"; $missing += "venv" }
+    }
+    if (Test-Path $venvPy) {
+        Info "Installing Python dependencies into the venv"
+        try {
+            & $venvPy -m pip install --upgrade pip | Out-Null
+            & $venvPy -m pip install -r (Join-Path $repoDir "requirements.txt") | Out-Null
+            Ok "Python dependencies installed"; $installed += "Python deps"
+        } catch {
+            Failm "pip install failed"
+            $missing += "Python deps - & '$venvPy' -m pip install -r '$repoDir\requirements.txt'"
+        }
+    }
 } else {
     Failm "python not found - install Python 3.10+ from https://python.org"; $missing += "Python 3.10+"
 }
 
-# --- 5. Ollama ---------------------------------------------------------------
-# Model pulls are deliberately not automated here - llama3.1:8b and
-# mark2-report are multi-GB downloads, and which one (or neither, if you're
-# on Claude) you want is a choice for the user, not this script. See the
-# README's "Setting up Ollama" section for the pull commands.
-if (Have ollama) {
-    Ok "Ollama already installed"; $already += "ollama"
+# --- 5. the `pulser` launcher -------------------------------------------------
+# So a user never has to cd into the repo or activate the venv: `pulser` from
+# anywhere runs agent.py on the venv's interpreter with all args forwarded.
+$shimDir = Join-Path $env:LOCALAPPDATA "Programs\Pulser"
+$shim    = Join-Path $shimDir "pulser.cmd"
+if ($SkipShim) {
+    Skipm "Launcher skipped (-SkipShim)"
+} elseif (-not (Test-Path $venvPy)) {
+    Warn "Skipping the launcher - no venv to point it at"
 } else {
-    Warn "Ollama not found - skipping"
-    $manual += "Ollama - install from https://ollama.com/download, then see the README's 'Setting up Ollama' section to pull a report-stage model"
+    New-Item -ItemType Directory -Force -Path $shimDir | Out-Null
+    # %* forwards every argument; @echo off keeps the shim itself out of the output.
+    # The `cd /d` is load-bearing, not cosmetic: agent.py resolves DB_PATH
+    # ("vulnerability_cache.db") and SCAN_LOG_DB ("scan_log.db") relative to the working
+    # directory. Without it, `pulser` from anywhere else would miss the CVE cache and
+    # silently trigger a full NVD re-sync against an empty DB.
+    $shimBody = "@echo off`r`ncd /d `"$repoDir`" || exit /b 1`r`n`"$venvPy`" agent.py %*`r`n"
+    $shimBody | Set-Content -Path $shim -Encoding ASCII -NoNewline
+    Ok "Launcher installed at $shim"; $installed += "pulser launcher"
+
+    $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($userPath -notlike "*$shimDir*") {
+        Info "Adding $shimDir to your user PATH"
+        [System.Environment]::SetEnvironmentVariable("PATH", "$userPath;$shimDir", "User")
+        $manual += 'Reopen your terminal so "pulser" is on PATH (it was added to your user PATH just now)'
+    }
+}
+
+# --- 6. wait on the background jobs ------------------------------------------
+if ($ollamaJob) {
+    Info "Waiting for the $Model pull to finish"
+    Wait-Job $ollamaJob | Out-Null
+    if ($ollamaJob.State -eq 'Completed') { Ok "Model $Model pulled"; $installed += "model $Model" }
+    else {
+        Failm "Model pull failed"
+        Receive-Job $ollamaJob -ErrorAction SilentlyContinue | Select-Object -Last 1 | Write-Host
+        $manual += "ollama pull $Model"
+    }
+    Remove-Job $ollamaJob -Force
+}
+if ($cacheJob) {
+    Info "Waiting for the CVE cache download to finish"
+    Wait-Job $cacheJob | Out-Null
+    if ($cacheJob.State -eq 'Completed' -and (Test-Path $cacheDb)) {
+        Ok "CVE cache ready"; $installed += "CVE cache"
+    } else {
+        Failm "CVE cache download failed"
+        Receive-Job $cacheJob -ErrorAction SilentlyContinue | Select-Object -Last 1 | Write-Host
+        Remove-Item "$cacheDb.gz","$cacheDb.part" -Force -ErrorAction SilentlyContinue
+        $manual += "CVE cache - download $CacheUrl and unpack it to $cacheDb (see README)"
+    }
+    Remove-Job $cacheJob -Force
 }
 
 # --- summary -----------------------------------------------------------------
 Write-Host ""
 Info "Summary"
-if ($installed) { Write-Host "  Installed now:"; $installed | ForEach-Object { Ok $_ } }
-if ($already)   { Write-Host "  Already present:"; $already | ForEach-Object { Write-Host "  ( ) $_" -ForegroundColor DarkGray } }
-if ($missing)   { Write-Host "  Needs attention:"; $missing | ForEach-Object { Failm $_ } }
+if ($installed) { Write-Host "  Installed now:";    $installed | ForEach-Object { Ok $_ } }
+if ($already)   { Write-Host "  Already present:";  $already   | ForEach-Object { Skipm $_ } }
+if ($missing)   { Write-Host "  Needs attention:";  $missing   | ForEach-Object { Failm $_ } }
+if ($manual)    { Write-Host "  You must still do yourself:"; $manual | ForEach-Object { Warn $_ } }
 
 Write-Host ""
-Write-Host "  You must still do yourself:" -ForegroundColor White
-$manual | ForEach-Object { Warn $_ }
 Warn "Run Pulser as Administrator for elevation-gated audit checks and raw-socket nmap scans."
-Warn "The CVE cache (~3.2 GB) is not installed here - download vulnerability_cache.db.gz from Releases (see README)."
-
 Write-Host ""
-if (-not $missing) { Ok "Ready. Run: python agent.py --target 127.0.0.1" }
-else { Warn "Some components need manual attention; Pulser still runs degraded (missing scanners report 'unavailable')." }
+if (-not $missing) {
+    if (-not $SkipShim -and (Test-Path $shim)) { Ok "Ready. Run: pulser" }
+    else { Ok "Ready. Run: & '$venvPy' '$repoDir\agent.py'" }
+} else {
+    Warn "Some components need attention above; Pulser still runs degraded (missing scanners report 'unavailable')."
+}

@@ -225,8 +225,8 @@ Wraps the subgraphs into `@tool`-decorated LangChain tools (`TOOLS` list) that `
 There is no separate `llm_backend.py` module — `_get_llm()` in `agent.py` picks a LangChain chat model directly based on `LLM_PROVIDER`, and that model is used as-is (`.invoke()`) for the `report` LLM step (the only LLM step — see the triage note below). No custom response-normalization layer; LangChain's own message/response types are used throughout.
 
 **`ollama`** (default, `LLM_PROVIDER=ollama`): `langchain_ollama.ChatOllama`.
-- Config: `OLLAMA_MODEL` (default: `llama3.1:8b`) for the `report` stage, `OLLAMA_HOST` (default: `http://localhost:11434`)
-- A fine-tuned `pseudocoder204/mark2-report` model (trained on the report stage's exact prompt/output contract, see `FinetuneGuide.txt` and `finetune/publish_model.sh`) is published to the Ollama registry as a drop-in `OLLAMA_MODEL` value: `ollama pull pseudocoder204/mark2-report`, then `OLLAMA_MODEL=pseudocoder204/mark2-report`. See README.md § Setting up Ollama for the full setup walkthrough.
+- Config: `OLLAMA_MODEL` (default: `agent.DEFAULT_OLLAMA_MODEL` = `pseudocoder204/mark2-report`) for the `report` stage, `OLLAMA_HOST` (default: `http://localhost:11434`)
+- The default **is** the fine-tuned model — trained on the report stage's exact prompt/output contract (see `FinetuneGuide.txt` and `finetune/publish_model.sh`) and published to the Ollama registry. `install.sh`/`install.ps1` pull it, so the happy path needs no env var at all. Stock `llama3.1:8b` remains a supported fallback via `OLLAMA_MODEL=llama3.1:8b` (after `ollama pull llama3.1:8b`). Both `_get_llm()` and the startup banner read the same `DEFAULT_OLLAMA_MODEL` constant — change it in one place. See README.md § Install for the setup walkthrough.
 
 **`claude`** (`LLM_PROVIDER=claude`): `langchain_anthropic.ChatAnthropic`. Requires `ANTHROPIC_API_KEY` set; `langchain-anthropic` (and the transitive `anthropic` SDK) come from `requirements.txt`.
 - Config: `ANTHROPIC_MODEL` (default: `claude-opus-4-8`)
@@ -289,7 +289,7 @@ The pipeline runs natively per-OS via runtime `platform.system()` dispatch — *
 |---|---|---|
 | `TARGET` | `127.0.0.1` | `agent.py`, Docker entrypoint, subgraphs |
 | `LLM_PROVIDER` | `ollama` | `agent.py` (`_get_llm`) — selects backend |
-| `OLLAMA_MODEL` | `llama3.1:8b` | `agent.py` — `ChatOllama`, report stage (the only LLM stage — triage is deterministic, see above). Set to `pseudocoder204/mark2-report` to use the fine-tuned model (after `ollama pull`) |
+| `OLLAMA_MODEL` | `pseudocoder204/mark2-report` | `agent.py` — `ChatOllama`, report stage (the only LLM stage — triage is deterministic, see above). The default is the fine-tuned model, which `install.sh`/`install.ps1` pull; set to `llama3.1:8b` for the stock base model instead |
 | `OLLAMA_HOST` | `http://host.docker.internal:11434` | `agent.py` — `ChatOllama` (Docker default) |
 | `ANTHROPIC_MODEL` | `claude-opus-4-8` | `agent.py` — `ChatAnthropic` |
 | `ANTHROPIC_API_KEY` | _(required for claude)_ | `agent.py` — `ChatAnthropic` |
