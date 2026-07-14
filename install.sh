@@ -255,6 +255,10 @@ else
     fi
 
     OLLAMA_SERVE_LOG="$(mktemp)"
+    # Tracks whether THIS run spawned the server. Only a server we ourselves
+    # started is ever safe to kill/restart later - one that was already running
+    # might be serving other apps or hold state we don't own.
+    WE_STARTED_OLLAMA=0
     if have ollama; then
         # The Linux installer registers a systemd service; the macOS cask does not
         # start anything until the app runs. Either way, `ollama pull` needs a live
@@ -262,10 +266,23 @@ else
         if ! curl -fsS http://localhost:11434/api/version >/dev/null 2>&1; then
             info "Starting the Ollama server"
             nohup ollama serve > "$OLLAMA_SERVE_LOG" 2>&1 &
+            WE_STARTED_OLLAMA=1
             for _ in $(seq 1 30); do
                 curl -fsS http://localhost:11434/api/version >/dev/null 2>&1 && break
                 sleep 1
             done
+            # Our own spawn can fail to bind :11434 if the ORIGINAL server was
+            # actually up all along and our first check just caught it mid-
+            # response - that's not a real outage, so don't credit ourselves with
+            # having started anything, and give the real server a beat.
+            if ! curl -fsS http://localhost:11434/api/version >/dev/null 2>&1 && grep -q "bind:" "$OLLAMA_SERVE_LOG" 2>/dev/null; then
+                info "Port already bound by an existing Ollama process — rechecking"
+                WE_STARTED_OLLAMA=0
+                for _ in $(seq 1 20); do
+                    curl -fsS http://localhost:11434/api/version >/dev/null 2>&1 && break
+                    sleep 1
+                done
+            fi
         fi
         if curl -fsS http://localhost:11434/api/version >/dev/null 2>&1; then
             if ollama list 2>/dev/null | grep -q "^${MODEL%%:*}"; then
@@ -277,16 +294,20 @@ else
                     attempt=1
                     until ollama pull "$MODEL"; do
                         [ "$attempt" -ge 3 ] && exit 1
-                        # A server that's still running but whose ~/.ollama got wiped or
-                        # corrupted underneath it (e.g. a stale process from before a
-                        # manual reset) fails every pull with the same on-disk error no
-                        # matter how many times you retry against it - restart the
-                        # server itself so a missing keypair/state gets regenerated.
-                        echo "--- pull attempt $attempt failed, restarting the Ollama server and retrying in 5s ---"
-                        pkill -f "ollama serve" 2>/dev/null || true
-                        sleep 1
-                        nohup ollama serve >/dev/null 2>&1 &
-                        sleep 4
+                        if [ "$WE_STARTED_OLLAMA" -eq 1 ]; then
+                            # We own this process's lifecycle (we started it a few
+                            # seconds ago in this same run), so it's safe to restart
+                            # if its state is broken (e.g. a wiped keypair).
+                            echo "--- pull attempt $attempt failed, restarting the Ollama server we started and retrying in 5s ---"
+                            pkill -f "ollama serve" 2>/dev/null || true
+                            sleep 1
+                            nohup ollama serve >/dev/null 2>&1 &
+                            sleep 4
+                        else
+                            # Someone else's server - never kill it out from under them.
+                            echo "--- pull attempt $attempt failed - not restarting a pre-existing Ollama server; retrying in 5s ---"
+                            sleep 5
+                        fi
                         attempt=$((attempt + 1))
                     done
                 ) > "$OLLAMA_LOG" 2>&1 &

@@ -230,6 +230,12 @@ if ($Claude) {
         # always instantly - `ollama pull` needs a live server on :11434.
         $up = Wait-ForHttp "http://localhost:11434/api/version" 20 "checking for the Ollama server"
         $serveLog = Join-Path $env:TEMP "pulser-ollama-serve.log"
+        # Tracks whether THIS run spawned the server. Only a server we ourselves
+        # started is ever safe to kill/restart later - one that was already
+        # running might be serving other apps or hold state we don't own, and a
+        # slow first health-check response (not an actual outage) must not be
+        # mistaken for licence to touch it.
+        $weStartedServer = $false
         if (-not $up) {
             Info "Starting the Ollama server"
             # A just-installed ollama.exe can be slow to come up on first run
@@ -240,27 +246,47 @@ if ($Claude) {
             # we otherwise have zero idea why (port conflict, missing dep, etc).
             Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden `
                 -RedirectStandardOutput $serveLog -RedirectStandardError "$serveLog.err"
+            $weStartedServer = $true
             $up = Wait-ForHttp "http://localhost:11434/api/version" 90 "waiting for the Ollama server to start"
+            if (-not $up) {
+                # Our own spawn can fail to bind :11434 if the ORIGINAL server was
+                # actually up all along and our first check just caught it mid-
+                # response - that's not a real outage, so don't credit ourselves
+                # with having started anything, and give the real server a beat.
+                $errText = ""
+                if (Test-Path "$serveLog.err") { $errText = Get-Content "$serveLog.err" -Raw -ErrorAction SilentlyContinue }
+                if ($errText -match "bind:") {
+                    Info "Port already bound by an existing Ollama process - rechecking"
+                    $weStartedServer = $false
+                    $up = Wait-ForHttp "http://localhost:11434/api/version" 20 "rechecking the existing Ollama server"
+                }
+            }
         }
         if ($up) {
             if ((ollama list 2>$null | Out-String) -match [regex]::Escape($Model)) {
                 Ok "Model $Model already pulled"; $already += "model $Model"
             } else {
                 Info "Pulling $Model in the background (multi-GB - this is the slow part, retries automatically on transient failures)"
-                $ollamaJob = Start-Job -ArgumentList $Model -ScriptBlock {
-                    param($m)
+                $ollamaJob = Start-Job -ArgumentList $Model, $weStartedServer -ScriptBlock {
+                    param($m, $weStarted)
                     for ($attempt = 1; $attempt -le 3; $attempt++) {
                         & ollama pull $m 2>&1 | Out-String | Write-Output
                         if ($LASTEXITCODE -eq 0) { return }
-                        # A server that's still running but whose state got wiped or
-                        # corrupted underneath it fails every pull the same way no
-                        # matter how many times you retry against it - restart the
-                        # server itself so missing state gets regenerated.
-                        Write-Output "--- pull attempt $attempt failed, restarting the Ollama server and retrying in 5s ---"
-                        Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-                        Start-Sleep -Seconds 1
-                        Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
-                        Start-Sleep -Seconds 4
+                        if ($weStarted) {
+                            # We own this process's lifecycle (we started it a few
+                            # seconds ago in this same run), so it's safe to restart
+                            # if its state is broken (e.g. a wiped keypair).
+                            Write-Output "--- pull attempt $attempt failed, restarting the Ollama server we started and retrying in 5s ---"
+                            Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+                            Start-Sleep -Seconds 1
+                            Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
+                            Start-Sleep -Seconds 4
+                        } else {
+                            # Someone else's server - never kill it out from under
+                            # them. Just retry the pull as-is.
+                            Write-Output "--- pull attempt $attempt failed - not restarting a pre-existing Ollama server; retrying in 5s ---"
+                            Start-Sleep -Seconds 5
+                        }
                     }
                     throw "ollama pull failed after 3 attempts"
                 }
