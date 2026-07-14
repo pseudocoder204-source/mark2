@@ -572,7 +572,8 @@ def enrich_and_condense_findings(findings: List[ServiceFinding], db_path: str = 
         finding.cves = sorted(raw_cves, key=lambda x: float(x["cvss_score"]), reverse=True)[:5]
 
         llm_payload.append({
-            "port":    finding.port,
+            "port":     finding.port,
+            "protocol": finding.protocol,
             "service": finding.service_name,
             "product": finding.product,
             "version": finding.version,

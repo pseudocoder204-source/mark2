@@ -3,7 +3,7 @@
 
 Replaces SecGen: instead of launching vulnerable VMs, this hand-assembles a worker-output
 `results` dict per PHASE 1C's field contract, then runs it through the REAL
-`build_findings_table` + `_fallback_order` from agent.py — so every generated training
+`build_findings_table` from agent.py + `priority.rank` — so every generated training
 input is byte-identical in shape to what the live pipeline emits. No model, no scan, no VM.
 
 Six environment profiles model "different user environments" as sampling configs over the
@@ -26,8 +26,9 @@ from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent import build_findings_table, _fallback_order
+from agent import build_findings_table
 from lynis_subgraph import LYNIS_TEST_CATALOG
+from priority import ordered_refs, rank
 
 _VULN_DB_PATH = "vulnerability_cache.db"
 _TRAINSET_SCHEMA = """
@@ -341,11 +342,11 @@ _PROFILES = {
 
 def generate_ordered_facts(profile: str, conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """Assemble a synthetic `results` dict for `profile`, run it through the real
-    build_findings_table + _fallback_order, and return ordered_facts — identical in
+    build_findings_table + priority.rank, and return ordered_facts — identical in
     shape to what run_report's _log_training_input logs in production."""
     results = _PROFILES[profile](conn)
     table = build_findings_table(results)
-    order = _fallback_order(table)
+    order = ordered_refs(rank(table))
     by_ref = {f["ref"]: f for f in table}
     return [by_ref[r] for r in order if r in by_ref]
 

@@ -10,12 +10,12 @@ to a JSONL file. Gold outputs (Step 4) are drafted offline against these inputs.
 
 Why a separate harness instead of just running agent.py:
   - The `ordered_facts` row is fully determined by run_scan_phase -> build_findings_table
-    -> _fallback_order. None of that needs an LLM. But agent.py only *logs* the row
+    -> priority.rank. None of that needs an LLM. But agent.py only *logs* the row
     inside run_report(), which sits AFTER the triage+report LLM calls — so using
     agent.py as-is would force an Ollama backend in every collection box just to reach
     the log line. This harness skips triage/report entirely.
-  - `_fallback_order` is exactly the deterministic ordering triage itself falls back
-    to, so the row produced here is faithful to the real pipeline's deterministic path.
+  - `priority.rank` is the same deterministic ordering the DAG's `triage` node calls,
+    so the row produced here is faithful to the real pipeline's deterministic path.
   - The spine's malware stage reads a *cached* ClamAV result (get_last_malware_result);
     that's right for the product (a live scan can take hours) but wrong for data
     collection, where we want the live host findings (e.g. an EICAR test file). This
@@ -39,6 +39,7 @@ import time
 from typing import Any, Dict, List
 
 import agent
+import priority
 import tools
 
 
@@ -149,11 +150,13 @@ def collect(target: str, label: str, out_path: str, malware_mode: str,
     started = time.time()
     results = run_scan_phase(target, scope_token, malware_mode)
     table = agent.build_findings_table(results)
-    order = agent._fallback_order(table)
+    order = priority.ordered_refs(priority.rank(table))
 
-    # The full findings dicts in deterministic order.
+    # The full findings dicts in deterministic order, exactly as the report model
+    # sees them — agent.llm_view strips the cross-run bookkeeping fields (finding_key)
+    # so those never enter the model input or the dedup hash.
     by_ref = {f["ref"]: f for f in table}
-    ordered_facts = [by_ref[r] for r in order if r in by_ref]
+    ordered_facts = agent.llm_view([by_ref[r] for r in order if r in by_ref])
 
     fhash = _facts_hash(ordered_facts)
     if not allow_dupes and fhash in _existing_hashes(out_path):

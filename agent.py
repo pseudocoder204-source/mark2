@@ -8,8 +8,8 @@ spine and the LLM used only as a bounded side-car — never as the thing choosin
 to scan.
 
     scope_gate → scan_network → scan_iot_defaults → scan_filesystem → audit_host
-        → scan_malware → scan_web → enrich → triage (deterministic, refs-only)
-        → report (LLM, refs-only) → END
+        → scan_malware → scan_web → enrich → drift → intel → triage (deterministic, refs-only)
+        → persist → report (LLM, refs-only) → END
 
 Load-bearing rules enforced by code, not by prompt wording:
   - SCOPE GATE: the target is resolved and HMAC-signed into a scope_token *before* any
@@ -23,21 +23,52 @@ Load-bearing rules enforced by code, not by prompt wording:
     {"status": "error", ...} instead of crashing the whole run.
   - ENRICH builds a single findings table with a stable integer `ref` per finding.
     This table is the one and only source of facts from here on.
-  - TRIAGE is pure Python (`_fallback_order`): findings are ordered by severity tier
-    then CVSS, descending. FinetuneGuideTriage.txt Phase 5 tried three tuned models
-    (3B multi-turn, 3B single-shot, 7B multi-turn) and none beat this deterministic
-    ordering on held-out eval, so no LLM is called here — it was pure overhead.
-  - REPORT is an LLM call that turns the ordered findings table into plain language.
-    Its output is regex-validated to contain no CVE ID / CVSS number / CPE string; on
-    a second consecutive validation failure the report is rendered by a pure-Python
-    template built directly from the table instead of ever shipping an unvalidated
-    LLM report.
+  - DRIFT (`drift.compute_drift`, notes/DriftPlan.md Phase 3) reads scan_log.db's
+    prior finding_state *before* this run is persisted and classifies every finding
+    as NEW/PERSISTING/WORSENED/IMPROVED/REAPPEARED/UNOBSERVED, annotating each table
+    row with `drift_status`/`age_days`/`first_seen`/`reappearance_count`.
+    UNOBSERVED — a scanner that didn't run this pass — is never read as "fixed".
+  - INTEL (`exploit_intel.py`, notes/DriftPlan.md Phase 4) refreshes the local
+    CISA KEV / FIRST EPSS cache (daily-cadence, self-throttling, never raises —
+    a feed outage just leaves the cache as-is) and attaches kev/epss lookups per
+    finding via `priority.build_intel_map`. Entirely optional grounding: with no
+    CVE IDs or an empty cache a finding's exploitability term is just 0.0, no
+    different from before this node existed.
+  - TRIAGE calls `priority.rank` (notes/DriftPlan.md Phase 5): a deterministic,
+    explainable 0-100 score over severity/exploitability/exposure/drift/age/
+    fixability, with hard escalations (active malware, KEV on a reachable service,
+    default creds, a fix that keeps getting undone) pinned to the top band
+    regardless of score.
+  - PERSIST (`persist_node`, formerly `call_scan_log_node`) writes this run's scan
+    log *after* triage, using drift's verdict to decide whether an absent finding's
+    `finding_state.status` becomes resolved or stays untouched (UNOBSERVED).
+  - REPORT (notes/DriftPlan.md Phase 7) turns the ordered findings table into plain
+    language across three independent sections: `fix_now` (escalations + top priority
+    band), `still_open` (everything else, with age surfaced), and `resolved` (findings
+    drift confirmed gone since last run). Only `fix_now`/`still_open` call the LLM —
+    `resolved` has no analysis to do, so it's a pure-Python template, keeping the LLM
+    call count at two, not three. Each LLM section's output is regex-validated to
+    contain no CVE ID / CVSS number / CPE string; on a second consecutive validation
+    failure that section is rendered by a pure-Python template built directly from
+    the table instead of ever shipping an unvalidated LLM report. Drift markers
+    (🆕 NEW / ⚠️ WORSENED / 🔁 BACK AGAIN / ⏳ OPEN N DAYS) are attached to each
+    finding after the section is built, from the findings table, not from the LLM —
+    so they survive whichever of the two report paths produced the section.
 
 There is deliberately no free-form/autonomous mode (see futurePlan.txt — an agent
 that can decide what to scan next is unacceptable here). This is the only agent.
 
 Usage:
   python3 agent.py [--target IP_OR_HOST] [--json]
+
+Read-only/history CLI ops (DriftPlan.md Phase 8) — each of these reads or writes
+only scan_log.db and exits without running a scan or the LLM:
+  python3 agent.py --target IP --history          # risk-score-over-time sparkline
+  python3 agent.py --target IP --diff             # what changed since the last scan
+  python3 agent.py --target IP --list-open        # ranked list --resolve-ref indexes into
+  python3 agent.py --target IP --resolve FINDING_KEY
+  python3 agent.py --target IP --resolve-ref N     # Nth item from --list-open
+  python3 agent.py --target IP --forget           # delete this target's scan history
 
 Env vars (all optional):
   TARGET              Scan target          (default: 127.0.0.1)
@@ -46,7 +77,8 @@ Env vars (all optional):
   OLLAMA_HOST         Ollama base URL      (default: http://localhost:11434)
   ANTHROPIC_MODEL     Claude model for the report node (default: claude-opus-4-8)
   NVD_API_KEY   NVD key for faster sync
-  DB_PATH       Path to vulnerability_cache.db  (default: vulnerability_cache.db)
+  DB_PATH       Path to vulnerability_cache.db  (default: vulnerability_cache.db) —
+                also where the intel node caches CISA KEV / FIRST EPSS
   SCOPE_SECRET  HMAC secret for scope tokens (default: random per process)
 """
 import argparse
@@ -64,7 +96,20 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
 # from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
+import drift as drift_engine
+import exploit_intel
+import priority
 import tools
+from scan_log_db import (
+    STATUS_OPEN,
+    STATUS_RESOLVED,
+    forget_target,
+    get_finding_state,
+    get_last_scan,
+    get_observations,
+    mark_solved,
+    save_scan_log,
+)
 
 # ── Scope gate (pure Python, no LLM) ──────────────────────────────────────────
 
@@ -166,6 +211,26 @@ _WORKERS = [
 ]
 
 
+def scanner_status_map(results: Dict[str, Any]) -> Dict[str, str]:
+    """Per-scanner outcome for this run, persisted onto the `scans` row.
+
+    Load-bearing, not bookkeeping: a finding that is absent because its scanner
+    never ran ("unavailable", "error", "skipped", the malware cache's "pending")
+    must never be read as a finding the user fixed. This is the only record of
+    which absences are trustworthy.
+    """
+    status: Dict[str, str] = {}
+    for name, _needs_target, _fn in _WORKERS:
+        result = results.get(name)
+        if result is None:
+            status[name] = "missing"
+        elif isinstance(result, dict) and result.get("status"):
+            status[name] = str(result["status"])
+        else:
+            status[name] = "ok"
+    return status
+
+
 def run_scan_phase(target: str, scope_token: str) -> Dict[str, Any]:
     results: Dict[str, Any] = {}
 
@@ -205,6 +270,39 @@ def _severity_bucket(cvss: float) -> str:
     return "low"
 
 
+# ── Stable cross-run identity (finding_key) ──────────────────────────────────
+#
+# `ref` is a per-run integer the LLM cites; it means nothing across runs.
+# `finding_key` is the opposite: the identity of the *problem*, stable across
+# scans so a later run can tell "same thing, changed state" apart from "new
+# thing". Everything that changes when a user actually fixes something —
+# version, cvss, cve set, severity — is deliberately kept OUT of the key and
+# carried as an attribute instead. Keying on the version string is what makes
+# a patched service read as a brand-new finding while the old row can never be
+# cleared.
+#
+# The two namespaces must not be merged: finding_key is bookkeeping and is
+# never shown to the LLM (see _INTERNAL_FIELDS / llm_view).
+
+# Drift fields (drift_status/age_days/first_seen/reappearance_count) are bookkeeping
+# too: `priority.rank` reads them, and `_attach_drift_markers` (Phase 7) reads them
+# to annotate the *rendered* report after the fact — but the report LLM itself never
+# sees them, same reasoning as finding_key/version.
+_INTERNAL_FIELDS = ("finding_key", "version", "drift_status", "age_days", "first_seen", "reappearance_count")
+
+
+def llm_view(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The findings table as the report model sees it — cross-run bookkeeping
+    stripped. Keeping this a separate projection is what lets the table grow new
+    state fields without changing the model's input bytes."""
+    return [{k: v for k, v in row.items() if k not in _INTERNAL_FIELDS} for row in rows]
+
+
+def _key_part(value: Any, default: str = "unknown") -> str:
+    part = re.sub(r"\s+", "_", str(value or "").strip().lower())
+    return part or default
+
+
 def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
     table: List[Dict[str, Any]] = []
     ref = 0
@@ -231,9 +329,11 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                 cve_ids = [v.get("cve_id") for v in (rec.get("priority_vulnerabilities") or []) if v.get("cve_id")]
                 table.append({
                     "ref": ref,
+                    "finding_key": f"os:{_key_part(rec.get('os_name'), 'this_device')}",
                     "source": "host_os",
                     "affected": f"Operating system: {rec.get('os_name') or 'this device'}",
                     "cpe": None,  # not an app CPE — no lookup_cves escalation on it
+                    "version": None,
                     "cvss": cvss,
                     "severity": _severity_bucket(cvss),
                     "cve_ids": cve_ids,
@@ -263,9 +363,13 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
                 affected += f" {product}"
             table.append({
                 "ref": ref,
+                # Port + service is the asset; the version bump that follows a patch
+                # is an attribute change on this same key, not a new finding.
+                "finding_key": f"net:{rec.get('port')}/{_key_part(rec.get('protocol'), 'tcp')}:{_key_part(rec.get('service'))}",
                 "source": source,
                 "affected": affected.strip(),
                 "cpe": rec.get("cpe"),
+                "version": rec.get("version"),
                 "cvss": cvss,
                 "severity": _severity_bucket(cvss),
                 "cve_ids": cve_ids,
@@ -306,9 +410,11 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
 
             table.append({
                 "ref": ref,
+                "finding_key": f"pkg:{_key_part(v.get('package'))}",
                 "source": "filesystem",
                 "affected": f"Package: {v.get('package')} {v.get('installed_version', '')}".strip(),
                 "cpe": None,
+                "version": v.get("installed_version"),
                 "cvss": cvss,
                 "severity": _severity_bucket(cvss),
                 "cve_ids": [cve_id] if cve_id else [],
@@ -326,9 +432,12 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
             cvss = {"high": 7.5, "medium": 5.0}.get(sev, 3.0)
             table.append({
                 "ref": ref,
+                # test_id is already a stable catalog ID (Lynis SSH-7408, Windows WIN-DEFENDER-RT).
+                "finding_key": f"audit:{_key_part(v.get('test_id'))}",
                 "source": "host_audit",
                 "affected": f"Host setting: {v.get('test_id')}",
                 "cpe": None,
+                "version": None,
                 "cvss": cvss,
                 "severity": _severity_bucket(cvss),
                 "cve_ids": [],
@@ -347,9 +456,14 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
             cvss = {"high": 9.0, "medium": 6.0}.get(sev, 3.0)
             table.append({
                 "ref": ref,
+                # Content hash would be the better identity (a path flaps when malware
+                # relocates), but neither clamscan's FOUND lines nor Defender's threat
+                # history supply one — fall back to path+signature.
+                "finding_key": f"mal:{_key_part(v.get('sha256') or v.get('file_path'))}:{_key_part(v.get('signature'))}",
                 "source": "malware",
                 "affected": f"File: {v.get('file_path')}",
                 "cpe": None,
+                "version": None,
                 "cvss": cvss,
                 "severity": _severity_bucket(cvss),
                 "cve_ids": [],
@@ -365,9 +479,11 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
             cvss = v.get("cvss_score") or {"critical": 9.5, "high": 7.5, "medium": 5.0, "low": 2.0}.get(str(v.get("severity", "")).lower(), 3.0)
             table.append({
                 "ref": ref,
+                "finding_key": f"web:{_key_part(v.get('template_id'))}:{_key_part(v.get('matched_at') or v.get('host'), '')}",
                 "source": "web",
                 "affected": f"{v.get('name')} on {v.get('matched_at') or v.get('host', '')}".strip(),
                 "cpe": None,
+                "version": None,
                 "cvss": cvss,
                 "severity": _severity_bucket(cvss),
                 "cve_ids": [v.get("cve_id")] if v.get("cve_id") else [],
@@ -380,27 +496,28 @@ def build_findings_table(results: Dict[str, Any]) -> List[Dict[str, Any]]:
     return table
 
 
-# ── Triage: deterministic severity-tier + CVSS ordering ──────────────────────
+# ── Regex guards used by the report validator ─────────────────────────────────
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d+", re.IGNORECASE)
 _CPE_RE = re.compile(r"cpe:2\.3:", re.IGNORECASE)
 
 
-def _fallback_order(table: List[Dict[str, Any]]) -> List[int]:
-    ordered = sorted(table, key=lambda f: (_TIER_RANK.get(f["severity"], 0), f["cvss"]), reverse=True)
-    return [f["ref"] for f in ordered]
+def _split_by_band(ranked: List[Dict[str, Any]]) -> tuple:
+    """Partitions `priority.rank`'s output into (fix_now_refs, still_open_refs) using
+    each finding's priority `band` (escalated or top-score findings land in
+    priority.BAND_FIX_NOW; everything else is SOON/WATCH). `ranked` is already in
+    priority order, so both partitions preserve it — this is a filter, not a re-sort.
 
-
-def run_triage(table: List[Dict[str, Any]]) -> List[int]:
-    """Deterministic severity-tier + CVSS ordering — no LLM call.
-
-    FinetuneGuideTriage.txt Phase 5 (2026-07-12) evaluated three tuned models
-    (3B multi-turn, 3B single-shot, 7B multi-turn) against this fallback and none
-    beat it on held-out intra-tier Kendall-tau. Verdict: DO NOT SHIP; keep
-    _fallback_order. Since it never lost, calling an LLM here was pure latency
-    and cost with no upside — so triage no longer calls one at all.
+    DriftPlan.md Phase 7 replaces the old new-vs-unresolved split (by `drift_status`)
+    with this fix-now-vs-still-open split (by priority band): "new" vs "seen before"
+    was never the question that mattered for what to act on first — a REAPPEARED
+    critical and a PERSISTING low both count as "not new," but only one demands
+    immediate action, which is exactly what `priority.rank`'s band already encodes.
     """
-    return _fallback_order(table)
+    fix_now_refs, still_open_refs = [], []
+    for r in ranked:
+        (fix_now_refs if r["band"] == priority.BAND_FIX_NOW else still_open_refs).append(r["ref"])
+    return fix_now_refs, still_open_refs
 
 
 # ── Report: LLM turns ordered facts into plain language, no invented literals ─
@@ -529,7 +646,7 @@ def _run_report_chunk(llm, chunk_table: List[Dict[str, Any]]) -> Dict[str, Any]:
     order = [f["ref"] for f in chunk_table]
     messages = [
         SystemMessage(content=_REPORT_SYSTEM_PROMPT),
-        HumanMessage(content=json.dumps(chunk_table)),
+        HumanMessage(content=json.dumps(llm_view(chunk_table))),
     ]
 
     for attempt in range(2):
@@ -575,7 +692,7 @@ def run_report(llm, table: List[Dict[str, Any]], order: List[int]) -> Dict[str, 
     # Stitched deterministically rather than with one more LLM call over the
     # already-generated chunk summaries — keeps the merge itself failure-proof.
     overall = {3: "critical", 2: "high", 1: "medium", 0: "low"}[worst_tier]
-    summary = f"The scan found {len(findings)} issue(s) that need attention out of {len(table)} item(s) reviewed."
+    summary = f"The scan found {len(findings)} issue(s) that need attention out of {len(ordered_facts)} item(s) reviewed."
     return {"overall_risk": overall, "summary": summary, "findings": findings, "good_news": good_news}
 
 
@@ -614,14 +731,105 @@ def _parse_report(raw: str) -> dict:
         ) from exc
 
 
-# ── LangGraph DAG: scope_gate → workers → enrich → triage → report → END ─────
+# ── Drift markers + resolved section (DriftPlan.md Phase 7) ──────────────────
+#
+# These read `drift_status`/`age_days` straight off the findings table — never off
+# the LLM's output — so a marker survives regardless of whether a section's report
+# came back from the model or from `_deterministic_report`'s fallback template.
+
+_DRIFT_MARKER_TEXT = {
+    drift_engine.STATUS_NEW: "\U0001f195 NEW",  # 🆕
+    drift_engine.STATUS_WORSENED: "⚠️ WORSENED",  # ⚠️
+    drift_engine.STATUS_REAPPEARED: "\U0001f501 BACK AGAIN",  # 🔁
+}
+
+
+def _drift_marker(row: Dict[str, Any]) -> Optional[str]:
+    status = row.get("drift_status")
+    if status in _DRIFT_MARKER_TEXT:
+        return _DRIFT_MARKER_TEXT[status]
+    age_days = row.get("age_days")
+    if status == drift_engine.STATUS_PERSISTING and age_days:
+        return f"⏳ OPEN {age_days} DAYS"  # ⏳
+    return None
+
+
+def _attach_drift_markers(report: Dict[str, Any], table: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Annotates each rendered finding with a `drift_marker` (or None), matched back
+    to the findings table by its 'affected' string — the same key
+    `_validate_report_severities` already trusts as copied verbatim from the table."""
+    by_affected = {f["affected"]: f for f in table}
+    for finding in report.get("findings", []):
+        if not isinstance(finding, dict):
+            continue
+        row = by_affected.get(finding.get("affected"))
+        finding["drift_marker"] = _drift_marker(row) if row else None
+    return report
+
+
+def _resolved_report(resolved_findings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Pure-Python 'resolved' section — no LLM call. Per DriftPlan.md Phase 7's own
+    cost note: unlike fix_now/still_open, this section has no analysis to do, just a
+    list of good news, so it's rendered directly from drift's `resolved_findings`
+    snapshots instead of spending a third LLM round-trip on it."""
+    good_news = [
+        f"Fixed: {f.get('affected', 'an issue')} is no longer present."
+        for f in resolved_findings
+    ]
+    return {"count": len(resolved_findings), "good_news": good_news}
+
+
+def _format_scan_date(iso_ts: str) -> str:
+    parsed = time.strptime(iso_ts, "%Y-%m-%dT%H:%M:%SZ")
+    return time.strftime("%b %d", parsed).replace(" 0", " ")
+
+
+def _drift_header(
+    table: List[Dict[str, Any]],
+    resolved_findings: List[Dict[str, Any]],
+    previous_scan_at: Optional[str],
+) -> Optional[str]:
+    """The one-line 'Since your last scan on Jul 6: 2 new, 1 worsened, 3 resolved.'
+    header. None on a target's first-ever run — there is no prior scan to diff
+    against, and a fabricated 'no changes' header would be a lie the same way an
+    UNOBSERVED finding read as resolved would be (see drift.py's module docstring)."""
+    if not previous_scan_at:
+        return None
+    new_count = sum(1 for f in table if f.get("drift_status") == drift_engine.STATUS_NEW)
+    worsened_count = sum(1 for f in table if f.get("drift_status") == drift_engine.STATUS_WORSENED)
+    reappeared_count = sum(1 for f in table if f.get("drift_status") == drift_engine.STATUS_REAPPEARED)
+    resolved_count = len(resolved_findings)
+
+    parts = []
+    if new_count:
+        parts.append(f"{new_count} new")
+    if worsened_count:
+        parts.append(f"{worsened_count} worsened")
+    if reappeared_count:
+        parts.append(f"{reappeared_count} back again")
+    if resolved_count:
+        parts.append(f"{resolved_count} resolved")
+
+    change_summary = ", ".join(parts) if parts else "no changes"
+    return f"Since your last scan on {_format_scan_date(previous_scan_at)}: {change_summary}."
+
+
+# ── LangGraph DAG: scope_gate → scan_phase → enrich → drift → intel → triage → persist → report → END
 
 class AgentState(TypedDict, total=False):
     target: str
     scope_token: str
     raw_results: Dict[str, Any]
     findings_table: List[Dict[str, Any]]
+    scanner_status: Dict[str, str]
+    drift_records: Dict[str, Any]
+    resolved_findings: List[Dict[str, Any]]
+    intel_map: Dict[str, Any]
+    fix_now_refs: List[int]
+    still_open_refs: List[int]
     priority_order: List[int]
+    priority_ranked: List[Dict[str, Any]]
+    previous_scan_at: Optional[str]
     report: Dict[str, Any]
     error: str
 
@@ -649,6 +857,33 @@ def _get_report_llm():
     return _get_llm()
 
 
+def _scan_log_db_path() -> str:
+    return os.environ.get("SCAN_LOG_DB", "scan_log.db")
+
+
+def _vuln_cache_db_path() -> str:
+    # Same env var and default tools.py already reads for the NVD cache — KEV/EPSS
+    # are enrichment data of the same class, stored in the same file (exploit_intel.py).
+    return os.environ.get("DB_PATH", "vulnerability_cache.db")
+
+
+def _resolved_status_overrides(drift_records: Dict[str, Any]) -> Dict[str, str]:
+    """The only `finding_state.status` transition drift needs to force onto
+    `save_scan_log`: a finding absent this run that drift confirmed RESOLVED
+    (its scanner ran and it's genuinely gone). Present findings need no entry —
+    `save_scan_log` already defaults an unlisted key to STATUS_OPEN on insert/
+    update. An absent UNOBSERVED finding is deliberately omitted too, so
+    `save_scan_log` leaves its prior status untouched; passing a status for it
+    here would be exactly the "scanner didn't run this time" lie drift.py's
+    module docstring calls the worst failure mode available.
+    """
+    return {
+        key: STATUS_RESOLVED
+        for key, rec in drift_records.items()
+        if rec.get("status") == drift_engine.STATUS_RESOLVED_
+    }
+
+
 def _build_graph(report_llm):
     def scope_gate_node(state: AgentState) -> AgentState:
         try:
@@ -665,26 +900,120 @@ def _build_graph(report_llm):
         table = build_findings_table(state["raw_results"])
         return {"findings_table": table}
 
+    def drift_node(state: AgentState) -> AgentState:
+        # Must read scan_log.db's prior finding_state BEFORE this run is persisted
+        # (persist_node, which runs after triage) — compute_drift does that read
+        # internally via scan_log_db.get_finding_state.
+        db_path = _scan_log_db_path()
+        scanner_status = scanner_status_map(state["raw_results"])
+        records = drift_engine.compute_drift(
+            state["target"], state["findings_table"], scanner_status, db_path
+        )
+
+        table = state["findings_table"]
+        for finding in table:
+            rec = records.get(finding["finding_key"])
+            if rec is None:
+                continue
+            finding["drift_status"] = rec["status"]
+            finding["age_days"] = rec["age_days"]
+            finding["first_seen"] = rec["first_seen"]
+            finding["reappearance_count"] = rec["reappearance_count"]
+
+        # Findings gone since last run, reconstructed from their last-known
+        # snapshot — not yet surfaced in the report (notes/DriftPlan.md Phase 7's
+        # "good_news: you fixed N things" section), but computed here since drift
+        # is the only node that has both the prior and current state in hand.
+        resolved = [
+            rec["snapshot"]
+            for rec in records.values()
+            if rec["status"] == drift_engine.STATUS_RESOLVED_ and rec.get("snapshot")
+        ]
+
+        return {
+            "findings_table": table,
+            "scanner_status": scanner_status,
+            "drift_records": records,
+            "resolved_findings": resolved,
+        }
+
+    def intel_node(state: AgentState) -> AgentState:
+        db_path = _vuln_cache_db_path()
+        # Both syncs swallow their own network/parse failures (exploit_intel.py's
+        # module docstring) and leave the existing cache untouched rather than
+        # raising — an enrichment feed must never become a hard dependency here.
+        exploit_intel.sync_exploit_intel(db_path)
+        intel_map = priority.build_intel_map(state["findings_table"], db_path)
+        return {"intel_map": intel_map}
+
     def triage_node(state: AgentState) -> AgentState:
-        order = run_triage(state["findings_table"])
-        return {"priority_order": order}
+        ranked = priority.rank(
+            state["findings_table"],
+            drift=state.get("drift_records"),
+            intel=state.get("intel_map"),
+        )
+        order = priority.ordered_refs(ranked)
+        fix_now_refs, still_open_refs = _split_by_band(ranked)
+        return {
+            "priority_order": order,
+            "priority_ranked": ranked,
+            "fix_now_refs": fix_now_refs,
+            "still_open_refs": still_open_refs,
+        }
+
+    def persist_node(state: AgentState) -> AgentState:
+        db_path = _scan_log_db_path()
+        # Read before save_scan_log below writes this run's own `scans` row, or
+        # "previous" would resolve to the run we're in the middle of persisting.
+        previous_scan = get_last_scan(db_path, state["target"])
+        drift_records = state.get("drift_records") or {}
+        # Persist the tool-output JSON exactly as it stands right before the
+        # report LLM sees it — the durable, literal scan log — alongside which
+        # scanners actually ran (what makes a *missing* finding interpretable on
+        # the next run) and drift's open/resolved verdict for this run.
+        save_scan_log(
+            db_path,
+            state["target"],
+            state["findings_table"],
+            scanner_status=state.get("scanner_status") or scanner_status_map(state["raw_results"]),
+            drift=_resolved_status_overrides(drift_records),
+        )
+        return {"previous_scan_at": previous_scan["started_at"] if previous_scan else None}
 
     def report_node(state: AgentState) -> AgentState:
-        report = run_report(report_llm, state["findings_table"], state["priority_order"])
+        table = state["findings_table"]
+        resolved_findings = state.get("resolved_findings") or []
+
+        fix_now_report = _attach_drift_markers(run_report(report_llm, table, state["fix_now_refs"]), table)
+        still_open_report = _attach_drift_markers(run_report(report_llm, table, state["still_open_refs"]), table)
+        resolved_report = _resolved_report(resolved_findings)
+
+        report = {
+            "drift_header": _drift_header(table, resolved_findings, state.get("previous_scan_at")),
+            "fix_now": fix_now_report,
+            "still_open": still_open_report,
+            "resolved": resolved_report,
+        }
         return {"report": report}
 
     graph = StateGraph(AgentState)
     graph.add_node("scope_gate", scope_gate_node)
     graph.add_node("scan_phase", scan_phase_node)
     graph.add_node("enrich", enrich_node)
+    graph.add_node("drift", drift_node)
+    graph.add_node("intel", intel_node)
     graph.add_node("triage", triage_node)
+    graph.add_node("persist", persist_node)
     graph.add_node("report", report_node)
 
     graph.set_entry_point("scope_gate")
     graph.add_conditional_edges("scope_gate", _route, {"continue": "scan_phase", END: END})
     graph.add_edge("scan_phase", "enrich")
-    graph.add_edge("enrich", "triage")
-    graph.add_edge("triage", "report")
+    graph.add_edge("enrich", "drift")
+    graph.add_edge("drift", "intel")
+    graph.add_edge("intel", "triage")
+    graph.add_edge("triage", "persist")
+    graph.add_edge("persist", "report")
     graph.add_edge("report", END)
 
     app = graph.compile()
@@ -708,28 +1037,26 @@ def run_agent(target: str) -> dict:
 _BADGE = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}
 
 
-def render_report(report: dict) -> str:
-    overall = report.get("overall_risk", "unknown").lower()
+def _render_section(section: dict, label: str) -> List[str]:
+    overall = section.get("overall_risk", "unknown").lower()
     badge   = _BADGE.get(overall, "⚪")
     lines   = [
+        f"── {label}   {badge} {overall.upper()} RISK ──",
         "",
-        "=" * 62,
-        f"  SECURITY DIAGNOSTIC REPORT   {badge} {overall.upper()} RISK",
-        "=" * 62,
-        "",
-        report.get("summary", ""),
+        section.get("summary", ""),
         "",
     ]
 
-    findings = report.get("findings", [])
+    findings = section.get("findings", [])
     if findings:
         lines.append(f"── ISSUES FOUND ({len(findings)}) ──────────────────────────────────────")
         for i, f in enumerate(findings, 1):
-            sev  = f.get("severity", "unknown").lower()
-            fb   = _BADGE.get(sev, "⚪")
+            sev    = f.get("severity", "unknown").lower()
+            fb     = _BADGE.get(sev, "⚪")
+            marker = f" {f['drift_marker']}" if f.get("drift_marker") else ""
             lines += [
                 "",
-                f"  {i}. {fb} [{sev.upper()}]  {f.get('title', 'Unnamed issue')}",
+                f"  {i}. {fb} [{sev.upper()}]  {f.get('title', 'Unnamed issue')}{marker}",
                 f"     Affected       : {f.get('affected', 'N/A')}",
                 f"     What it means  : {f.get('what_it_means', '')}",
                 f"     Why it matters : {f.get('why_it_matters', '')}",
@@ -756,14 +1083,198 @@ def render_report(report: dict) -> str:
     else:
         lines.append("  ✅  No issues found!")
 
-    good = report.get("good_news") or []
+    good = section.get("good_news") or []
     if good:
         lines += ["", "── GOOD NEWS ──────────────────────────────────────────────"]
         for item in good:
             lines.append(f"  ✅  {item}")
 
+    return lines
+
+
+def render_report(report: dict) -> str:
+    lines = [
+        "",
+        "=" * 62,
+        "  SECURITY DIAGNOSTIC REPORT",
+        "=" * 62,
+        "",
+    ]
+    header = report.get("drift_header")
+    if header:
+        lines += [header, ""]
+    lines += _render_section(report.get("fix_now") or {}, "FIX NOW")
     lines += ["", "=" * 62, ""]
+    lines += _render_section(report.get("still_open") or {}, "STILL OPEN")
+    lines += ["", "=" * 62, ""]
+
+    resolved = report.get("resolved") or {}
+    good_news = resolved.get("good_news") or []
+    if good_news:
+        lines.append("── RESOLVED SINCE LAST SCAN ────────────────────────────────")
+        for item in good_news:
+            lines.append(f"  ✅  {item}")
+        lines += ["", "=" * 62, ""]
+
     return "\n".join(lines)
+
+
+# ── Phase 8: read-only CLI operations (history/diff/resolve/forget) ──────────
+#
+# None of these touch a scanner or the LLM — they only read/write scan_log.db,
+# so they run instantly and work offline. Handled in `main()` before the scope
+# gate / worker spine, and each one exits the process rather than falling
+# through to a live scan.
+
+_SPARK_CHARS = "▁▂▃▄▅▆▇█"  # ▁▂▃▄▅▆▇█
+
+
+def _sparkline(values: List[float], vmax: float = 10.0) -> str:
+    if not values:
+        return ""
+    n = len(_SPARK_CHARS) - 1
+    return "".join(_SPARK_CHARS[min(n, max(0, int((v / vmax) * n)))] for v in values)
+
+
+def _risk_history(db_path: str, target: str) -> List[Dict[str, Any]]:
+    """One point per logged scan: the highest CVSS among findings actually seen
+    (seen=1) that run, oldest first. Built from `observations` alone — no new
+    schema needed, since every scan already writes a seen=0/1 row per known key."""
+    by_scan: Dict[str, Dict[str, Any]] = {}
+    for row in get_observations(db_path, target):
+        entry = by_scan.setdefault(row["scan_id"], {"started_at": row["started_at"], "max_cvss": 0.0})
+        if row["seen"] and (row.get("cvss") or 0.0) > entry["max_cvss"]:
+            entry["max_cvss"] = row["cvss"]
+    ordered = sorted(by_scan.items(), key=lambda kv: kv[1]["started_at"])
+    return [{"scan_id": sid, **data} for sid, data in ordered]
+
+
+def _print_history(db_path: str, target: str) -> None:
+    history = _risk_history(db_path, target)
+    if not history:
+        print(f"No scan history for {target!r} yet — run a scan first.")
+        return
+    scores = [h["max_cvss"] for h in history]
+    print(f"Risk history for {target} — {len(history)} scan(s):")
+    print(f"  {_sparkline(scores)}   ({history[0]['started_at'][:10]} → {history[-1]['started_at'][:10]})")
+    for h in history:
+        print(f"    {h['started_at']}  max CVSS {h['max_cvss']:.1f}")
+
+
+def _print_diff(db_path: str, target: str) -> None:
+    diff = drift_engine.diff_last_two_scans(db_path, target)
+    if diff is None:
+        print(f"Not enough scan history for {target!r} to diff — need at least 2 logged scans.")
+        return
+    changes = diff["changes"]
+    print(f"Changes for {target} — {diff['older_scan_at']} → {diff['latest_scan_at']}:")
+    if not changes:
+        print("  No changes.")
+        return
+    for rec in sorted(changes.values(), key=lambda r: (r["status"], -(r.get("cvss") or 0.0))):
+        print(f"  [{rec['status']}] {rec['affected']}  (severity={rec.get('severity')}, cvss={rec.get('cvss')})")
+
+
+def _reconstruct_open_table(db_path: str, target: str) -> List[Dict[str, Any]]:
+    """Rebuilds a findings-table-shaped list for every currently open, unsolved
+    finding on `target`, hydrated from each finding's last-known snapshot in
+    `finding_state`. Assigns a fresh sequential `ref` (this table only ever
+    exists for the duration of one CLI call, so those refs mean nothing beyond
+    it — same rule as any other `ref`, see `build_findings_table`'s docstring).
+    """
+    state = get_finding_state(db_path, target)
+    open_items = sorted(
+        (kv for kv in state.items() if kv[1].get("status") == STATUS_OPEN and not kv[1].get("solved")),
+        key=lambda kv: kv[0],  # stable base order; priority.rank fully re-sorts below
+    )
+    table = []
+    for ref, (key, rec) in enumerate(open_items):
+        finding = dict(rec.get("snapshot") or {})
+        finding["ref"] = ref
+        finding["finding_key"] = key
+        finding["_first_seen"] = rec.get("first_seen")
+        table.append(finding)
+    return table
+
+
+def _reconstruct_drift_map(db_path: str, target: str, table: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Best-effort `priority.rank`-shaped drift map, built without a live scan.
+    Prefers the real drift status from the last two logged scans
+    (`drift.diff_last_two_scans`) so `--resolve-ref`'s ordering uses the same
+    signal a live report would have; a finding with no usable diff entry (e.g.
+    only one scan has ever run, or it was already open before that) falls back
+    to PERSISTING — no evidence of a fresh change either way, the same default
+    `priority.py` itself uses for a first-ever run.
+    """
+    changes = {}
+    diff = drift_engine.diff_last_two_scans(db_path, target)
+    if diff:
+        changes = diff["changes"]
+
+    live_statuses = {
+        drift_engine.STATUS_NEW, drift_engine.STATUS_WORSENED,
+        drift_engine.STATUS_IMPROVED, drift_engine.STATUS_REAPPEARED,
+    }
+    drift_map = {}
+    for f in table:
+        key = f["finding_key"]
+        change = changes.get(key)
+        status = change["status"] if change and change["status"] in live_statuses else drift_engine.STATUS_PERSISTING
+        first_seen = f.get("_first_seen")
+        age_days = drift_engine.age_days_since(first_seen) if first_seen else 0
+        drift_map[key] = {"status": status, "age_days": age_days}
+    return drift_map
+
+
+def _open_findings_ranked(db_path: str, target: str, vuln_cache_db_path: str) -> List[Dict[str, Any]]:
+    """Currently-open, not-yet-solved findings for `target`, ordered by the same
+    `priority.rank` algorithm the last report used — not a plain severity/CVSS
+    approximation of it. Backs `--resolve-ref`. Exploit intel (`kev`/`epss`) is
+    read from whatever's already cached in vulnerability_cache.db; this is a
+    read-only, offline CLI op, so it deliberately does not trigger a network
+    sync the way the `intel` DAG node does.
+    """
+    table = _reconstruct_open_table(db_path, target)
+    if not table:
+        return []
+    drift_map = _reconstruct_drift_map(db_path, target, table)
+    intel_map = priority.build_intel_map(table, vuln_cache_db_path)
+    ranked = priority.rank(table, drift=drift_map, intel=intel_map)
+    by_ref = {f["ref"]: f for f in table}
+    return [by_ref[r["ref"]] for r in ranked]
+
+
+def _print_open_findings(db_path: str, target: str, vuln_cache_db_path: str) -> None:
+    """Prints the exact ranked list `--resolve-ref` consumes, numbered the same
+    way. Exists because the normal report numbers findings per-section (FIX NOW
+    starts at 1, STILL OPEN starts at 1 again), which does not line up with
+    `--resolve-ref`'s single flat ranking across every open finding — this is
+    the thing to actually look at before picking an N."""
+    candidates = _open_findings_ranked(db_path, target, vuln_cache_db_path)
+    if not candidates:
+        print(f"No open findings for {target!r}.")
+        return
+    print(f"Open findings for {target} — ranked by priority (use --resolve-ref N):")
+    for i, f in enumerate(candidates, 1):
+        sev = str(f.get("severity", "unknown")).upper()
+        print(f"  {i}. [{sev}] {f.get('affected', '(unknown)')}  (cvss={f.get('cvss')})")
+
+
+def _resolve_finding(db_path: str, target: str, finding_key: Optional[str], ref: Optional[int]) -> None:
+    if finding_key is None:
+        candidates = _open_findings_ranked(db_path, target, _vuln_cache_db_path())
+        if not candidates:
+            print(f"No open findings for {target!r}.", file=sys.stderr)
+            sys.exit(1)
+        if ref is None or ref < 1 or ref > len(candidates):
+            print(f"--resolve-ref must be between 1 and {len(candidates)} for {target!r}.", file=sys.stderr)
+            sys.exit(1)
+        finding_key = candidates[ref - 1]["finding_key"]
+    mark_solved(db_path, target, finding_key, solved=True)
+    print(
+        f"Marked {finding_key!r} as solved for {target}. If it shows up again in a "
+        "future scan, the report will flag it as a fix that didn't take."
+    )
 
 
 def main() -> None:
@@ -774,9 +1285,14 @@ def main() -> None:
             "Examples:\n"
             "  python3 agent.py\n"
             "  python3 agent.py --target 192.168.1.1\n"
-            "  python3 agent.py --json > report.json\n\n"
+            "  python3 agent.py --json > report.json\n"
+            "  python3 agent.py --target 192.168.1.1 --history\n"
+            "  python3 agent.py --target 192.168.1.1 --diff\n"
+            "  python3 agent.py --target 192.168.1.1 --list-open\n"
+            "  python3 agent.py --target 192.168.1.1 --resolve-ref 1\n"
+            "  python3 agent.py --target 192.168.1.1 --forget\n\n"
             "Env vars: TARGET, LLM_PROVIDER, OLLAMA_MODEL, OLLAMA_HOST, "
-            "ANTHROPIC_MODEL, NVD_API_KEY, DB_PATH, SCOPE_SECRET"
+            "ANTHROPIC_MODEL, NVD_API_KEY, DB_PATH, SCAN_LOG_DB, SCOPE_SECRET"
         ),
     )
     parser.add_argument(
@@ -790,7 +1306,63 @@ def main() -> None:
         dest="output_json",
         help="Print raw JSON report to stdout instead of the human-readable view.",
     )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Show the risk-score-over-time sparkline for --target from scan_log.db. No scan is run.",
+    )
+    parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Show what changed between the last two logged scans for --target. No scan is run.",
+    )
+    parser.add_argument(
+        "--list-open",
+        action="store_true",
+        help="List --target's currently-open findings in the exact ranked order "
+        "--resolve-ref uses (the normal report numbers FIX NOW/STILL OPEN "
+        "separately, which does not match --resolve-ref's flat numbering). No "
+        "scan is run.",
+    )
+    parser.add_argument(
+        "--resolve",
+        metavar="FINDING_KEY",
+        help="Mark FINDING_KEY as manually solved for --target. If it reappears in a "
+        "later scan, the report will call it out as a fix that didn't take.",
+    )
+    parser.add_argument(
+        "--resolve-ref",
+        type=int,
+        metavar="N",
+        help="Mark the Nth item from --list-open as solved (same priority-engine "
+        "ranking, same numbering — run --list-open first to see it). This does not "
+        "match the report's per-section numbering (FIX NOW/STILL OPEN each restart "
+        "at 1); see --resolve to target an exact finding_key instead.",
+    )
+    parser.add_argument(
+        "--forget",
+        action="store_true",
+        help="Delete all scan history for --target from scan_log.db. Cannot be undone.",
+    )
     args = parser.parse_args()
+
+    scan_log_path = _scan_log_db_path()
+    if args.forget:
+        forget_target(scan_log_path, args.target)
+        print(f"Forgot all scan history for {args.target}.")
+        return
+    if args.list_open:
+        _print_open_findings(scan_log_path, args.target, _vuln_cache_db_path())
+        return
+    if args.resolve or args.resolve_ref:
+        _resolve_finding(scan_log_path, args.target, args.resolve, args.resolve_ref)
+        return
+    if args.diff:
+        _print_diff(scan_log_path, args.target)
+        return
+    if args.history:
+        _print_history(scan_log_path, args.target)
+        return
 
     provider     = os.environ.get("LLM_PROVIDER", "ollama")
     report_model = (

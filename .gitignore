@@ -41,6 +41,10 @@ finetune/eval_triage.jsonl
 # ---- Internal planning / scratch notes (not for the public repo) ----
 notes/
 
+# Tests
+
+tests/
+
 # ---- Virtualenvs ----
 finetune/venv/
 

@@ -137,9 +137,8 @@ pip install -r requirements.txt
 ## Setting up Ollama
 
 Pulser has a single LLM stage: **report** (writes the plain-English report). Triage
-(ordering findings by priority) is deterministic Python, not an LLM call — three tuned
-triage models were evaluated and none beat the plain severity-tier+CVSS ordering on
-held-out data, so no LLM is invoked for it (see `notes/FinetuneGuideTriage.txt` Phase 5).
+(ordering findings by priority) is deterministic Python (`priority.rank`), not an LLM
+call, so no LLM is invoked for it.
 
 Neither [Quick install](#quick-install) nor `install.sh`/`install.ps1` pulls an Ollama model
 for you — both are multi-gigabyte downloads, and picking one is up to you, not something to
