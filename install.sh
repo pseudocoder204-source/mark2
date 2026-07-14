@@ -263,28 +263,28 @@ else
         # The Linux installer registers a systemd service; the macOS cask does not
         # start anything until the app runs. Either way, `ollama pull` needs a live
         # server on :11434, so make sure one is up before pulling.
-        if ! curl -fsS http://localhost:11434/api/version >/dev/null 2>&1; then
+        if ! curl -fsS --noproxy '*' http://localhost:11434/api/version >/dev/null 2>&1; then
             info "Starting the Ollama server"
             nohup ollama serve > "$OLLAMA_SERVE_LOG" 2>&1 &
             WE_STARTED_OLLAMA=1
             for _ in $(seq 1 30); do
-                curl -fsS http://localhost:11434/api/version >/dev/null 2>&1 && break
+                curl -fsS --noproxy '*' http://localhost:11434/api/version >/dev/null 2>&1 && break
                 sleep 1
             done
             # Our own spawn can fail to bind :11434 if the ORIGINAL server was
             # actually up all along and our first check just caught it mid-
             # response - that's not a real outage, so don't credit ourselves with
             # having started anything, and give the real server a beat.
-            if ! curl -fsS http://localhost:11434/api/version >/dev/null 2>&1 && grep -q "bind:" "$OLLAMA_SERVE_LOG" 2>/dev/null; then
+            if ! curl -fsS --noproxy '*' http://localhost:11434/api/version >/dev/null 2>&1 && grep -q "bind:" "$OLLAMA_SERVE_LOG" 2>/dev/null; then
                 info "Port already bound by an existing Ollama process — rechecking"
                 WE_STARTED_OLLAMA=0
                 for _ in $(seq 1 20); do
-                    curl -fsS http://localhost:11434/api/version >/dev/null 2>&1 && break
+                    curl -fsS --noproxy '*' http://localhost:11434/api/version >/dev/null 2>&1 && break
                     sleep 1
                 done
             fi
         fi
-        if curl -fsS http://localhost:11434/api/version >/dev/null 2>&1; then
+        if curl -fsS --noproxy '*' http://localhost:11434/api/version >/dev/null 2>&1; then
             if ollama list 2>/dev/null | grep -q "^${MODEL%%:*}"; then
                 ok "Model $MODEL already pulled"; ALREADY+=("model $MODEL")
             else

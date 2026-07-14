@@ -78,18 +78,24 @@ function Skipm($m){ Write-Host "  ( )  $m" -ForegroundColor DarkGray }
 # a multi-GB model pull, a 3.2 GB cache decompression) with zero console output,
 # which reads as "the installer is stuck." This prints an elapsed-time heartbeat
 # every few seconds until the job finishes, then reports its outcome.
-function Wait-ForHttp($url, $maxSeconds, $label) {
+# Checks readiness via `ollama list` itself rather than an HTTP GET. On a
+# machine with a system/corporate proxy configured, Invoke-WebRequest honors
+# that proxy even for localhost and can hang indefinitely against a perfectly
+# healthy server - confirmed on real hardware where `ollama list` returned
+# instantly but Invoke-WebRequest to the same port never did. Shelling out to
+# the CLI sidesteps WinINet/System.Net proxy resolution entirely, and it's the
+# same mechanism `ollama pull` itself will use.
+function Wait-ForOllamaReady($maxSeconds, $label) {
     $start = Get-Date
     while (((Get-Date) - $start).TotalSeconds -lt $maxSeconds) {
-        try {
-            Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 2 | Out-Null
+        & ollama list 2>$null 1>$null
+        if ($LASTEXITCODE -eq 0) {
             Write-Host "`r$(' ' * 80)`r" -NoNewline
             return $true
-        } catch {
-            $elapsed = [int]((Get-Date) - $start).TotalSeconds
-            Write-Host "`r  ...  $label ($elapsed`s elapsed, still waiting)  " -NoNewline -ForegroundColor DarkGray
-            Start-Sleep -Seconds 2
         }
+        $elapsed = [int]((Get-Date) - $start).TotalSeconds
+        Write-Host "`r  ...  $label ($elapsed`s elapsed, still waiting)  " -NoNewline -ForegroundColor DarkGray
+        Start-Sleep -Seconds 2
     }
     Write-Host "`r$(' ' * 80)`r" -NoNewline
     return $false
@@ -228,7 +234,7 @@ if ($Claude) {
     if (Have ollama) {
         # The Windows installer starts the server as a background service, but not
         # always instantly - `ollama pull` needs a live server on :11434.
-        $up = Wait-ForHttp "http://localhost:11434/api/version" 20 "checking for the Ollama server"
+        $up = Wait-ForOllamaReady 20 "checking for the Ollama server"
         $serveLog = Join-Path $env:TEMP "pulser-ollama-serve.log"
         # Tracks whether THIS run spawned the server. Only a server we ourselves
         # started is ever safe to kill/restart later - one that was already
@@ -247,7 +253,7 @@ if ($Claude) {
             Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden `
                 -RedirectStandardOutput $serveLog -RedirectStandardError "$serveLog.err"
             $weStartedServer = $true
-            $up = Wait-ForHttp "http://localhost:11434/api/version" 90 "waiting for the Ollama server to start"
+            $up = Wait-ForOllamaReady 90 "waiting for the Ollama server to start"
             if (-not $up) {
                 # Our own spawn can fail to bind :11434 if the ORIGINAL server was
                 # actually up all along and our first check just caught it mid-
@@ -258,7 +264,7 @@ if ($Claude) {
                 if ($errText -match "bind:") {
                     Info "Port already bound by an existing Ollama process - rechecking"
                     $weStartedServer = $false
-                    $up = Wait-ForHttp "http://localhost:11434/api/version" 20 "rechecking the existing Ollama server"
+                    $up = Wait-ForOllamaReady 20 "rechecking the existing Ollama server"
                 }
             }
         }
