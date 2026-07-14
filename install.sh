@@ -454,14 +454,24 @@ EOF
     case ":$PATH:" in
         *":$SHIM_DIR:"*) ;;
         *)
+            # install.ps1 edits the Windows PATH automatically and only asks the
+            # user to reopen their terminal - do the same here instead of leaving
+            # a command for them to copy-paste, since "zero manual steps" was the
+            # whole point of this installer.
             # macOS has defaulted to zsh since Catalina; Linux distros vary. Target
             # whatever $SHELL actually says, not a hardcoded ~/.bashrc that a zsh
             # user would never source.
             case "${SHELL:-}" in
-                */zsh) RC="~/.zshrc" ;;
-                *)     RC="~/.bashrc" ;;
+                */zsh) RC="$HOME/.zshrc" ;;
+                *)     RC="$HOME/.bashrc" ;;
             esac
-            MANUAL+=("Add $SHIM_DIR to your PATH:  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $RC")
+            if [ -f "$RC" ] && grep -qF "$SHIM_DIR" "$RC" 2>/dev/null; then
+                : # already added on a previous run - just needs a fresh shell
+            else
+                printf '\n# Added by the Pulser installer\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$RC"
+                ok "Added $SHIM_DIR to your PATH in $RC"
+            fi
+            MANUAL+=("Reopen your terminal (or run: source $RC) so \"pulser\" is on PATH")
             ;;
     esac
 fi
