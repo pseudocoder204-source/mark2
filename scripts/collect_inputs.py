@@ -25,8 +25,8 @@ Everything else — scope validation, per-worker error isolation, the findings t
 is imported from agent.py and tools.py, not reimplemented.
 
 Usage (typically run *inside* each vulnerable VM so all six scanners hit that box):
-    python3 collect_inputs.py --target 127.0.0.1 --label secgen-iot-01
-    python3 collect_inputs.py --target 192.168.56.10 --malware skip --label web-box
+    python3 -m scripts.collect_inputs --target 127.0.0.1 --label secgen-iot-01
+    python3 -m scripts.collect_inputs --target 192.168.56.10 --malware skip --label web-box
 """
 import argparse
 import hashlib
@@ -39,8 +39,8 @@ import time
 from typing import Any, Dict, List
 
 import agent
-import priority
-import tools
+from core import priority
+from core import tools
 
 
 # ── Live scan phase (mirrors agent.run_scan_phase, malware made configurable) ──

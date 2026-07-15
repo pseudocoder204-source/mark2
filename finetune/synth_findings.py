@@ -27,8 +27,8 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import build_findings_table
-from lynis_subgraph import LYNIS_TEST_CATALOG
-from priority import ordered_refs, rank
+from scanners.lynis.lynis_subgraph import LYNIS_TEST_CATALOG
+from core.priority import ordered_refs, rank
 
 _VULN_DB_PATH = "vulnerability_cache.db"
 _TRAINSET_SCHEMA = """

@@ -7,7 +7,7 @@ bundled install won't necessarily be on PATH. resolve() gives every parser one
 overridable way to find its binary:
 
     1. explicit env-var override  (NMAP_BINARY, NUCLEI_BINARY, TRIVY_BINARY, ...)
-    2. a bundled binaries dir (MARK2_BIN_DIR, else ./bin next to this file), where a
+    2. a bundled binaries dir (MARK2_BIN_DIR, else ./bin at the repo root), where a
        packaged Windows build drops nmap.exe / nuclei.exe / trivy.exe / etc.
     3. the tool name as-is → subprocess falls back to a PATH lookup (unchanged behavior)
 
@@ -31,7 +31,10 @@ def _bundled_dir() -> str:
     override = os.environ.get("MARK2_BIN_DIR")
     if override:
         return override
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+    # bin_resolver.py lives in scanners/; the bundled bin/ dir is next to the repo
+    # root (one level up), not next to this file, so this stays the same physical
+    # location (repo_root/bin) regardless of which package the resolver sits in.
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
 
 
 def resolve(tool: str) -> str:

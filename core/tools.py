@@ -36,7 +36,7 @@ def sync_nmap_db() -> None:
     RuntimeError if the DB is unavailable/sync fails; callers should treat that
     the same as an "unavailable" nmap tool result.
     """
-    from nmap_subgraph import run_db_sync
+    from scanners.nmap.nmap_subgraph import run_db_sync
     run_db_sync(db_path=_DB_PATH)
 
 
@@ -47,7 +47,7 @@ def scan_network(target: str) -> str:
     local database. Use this first to get a picture of what is exposed on the network."""
     if not re.match(r"^[\w.\-/]+$", target):
         raise ValueError(f"Invalid target format: {target!r}")
-    from nmap_subgraph import run_pipeline as nmap_run_pipeline
+    from scanners.nmap.nmap_subgraph import run_pipeline as nmap_run_pipeline
     try:
         payload = nmap_run_pipeline(target, db_path=_DB_PATH)
     except RuntimeError as exc:
@@ -62,7 +62,7 @@ def _scan_network_no_sync(target: str) -> str:
     """Fast-path used by agent.py's spine: assumes sync_nmap_db() already ran."""
     if not re.match(r"^[\w.\-/]+$", target):
         raise ValueError(f"Invalid target format: {target!r}")
-    from nmap_subgraph import run_pipeline as nmap_run_pipeline
+    from scanners.nmap.nmap_subgraph import run_pipeline as nmap_run_pipeline
     try:
         payload = nmap_run_pipeline(target, db_path=_DB_PATH, skip_sync=True)
     except RuntimeError as exc:
@@ -81,7 +81,7 @@ def discover_hosts(target: str) -> str:
     scan ports. Use this to inventory devices on the network before deeper scanning."""
     if not re.match(r"^[\w.\-/]+$", target):
         raise ValueError(f"Invalid target format: {target!r}")
-    from nmap_subgraph import run_pipeline as nmap_run_pipeline
+    from scanners.nmap.nmap_subgraph import run_pipeline as nmap_run_pipeline
     try:
         payload = nmap_run_pipeline(target, scan_type="host_discovery", db_path=_DB_PATH)
     except RuntimeError as exc:
@@ -101,7 +101,7 @@ def scan_iot_defaults(target: str) -> str:
     or scan_network."""
     if not re.match(r"^[\w.\-/]+$", target):
         raise ValueError(f"Invalid target format: {target!r}")
-    from nmap_subgraph import run_pipeline as nmap_run_pipeline
+    from scanners.nmap.nmap_subgraph import run_pipeline as nmap_run_pipeline
     try:
         payload = nmap_run_pipeline(target, scan_type="iot_default_creds", db_path=_DB_PATH)
     except RuntimeError as exc:
@@ -116,7 +116,7 @@ def _scan_iot_defaults_no_sync(target: str) -> str:
     """Fast-path used by agent.py's spine: assumes sync_nmap_db() already ran."""
     if not re.match(r"^[\w.\-/]+$", target):
         raise ValueError(f"Invalid target format: {target!r}")
-    from nmap_subgraph import run_pipeline as nmap_run_pipeline
+    from scanners.nmap.nmap_subgraph import run_pipeline as nmap_run_pipeline
     try:
         payload = nmap_run_pipeline(target, scan_type="iot_default_creds", db_path=_DB_PATH, skip_sync=True)
     except RuntimeError as exc:
@@ -142,7 +142,7 @@ def scan_filesystem() -> str:
             "reason": "trivy not applicable on Windows (no OS package DB); "
                       "OS patch state is covered by the host audit's Windows Update check",
         })
-    from trivy_subgraph import run_pipeline as trivy_run_pipeline
+    from scanners.trivy.trivy_subgraph import run_pipeline as trivy_run_pipeline
     try:
         payload = trivy_run_pipeline()
     except RuntimeError:
@@ -163,7 +163,7 @@ def lookup_cves(cpe: str) -> str:
     """Look up detailed CVE vulnerability records for a specific product using its
     CPE identifier. Use this to investigate a specific service found during a network
     scan when it shows a high risk score or critical vulnerabilities."""
-    from nmap_parser import fetch_cves_from_local_cache
+    from scanners.nmap.nmap_parser import fetch_cves_from_local_cache
     return json.dumps(fetch_cves_from_local_cache(cpe, db_path=_DB_PATH))
 
 
@@ -175,7 +175,7 @@ def scan_web(target: str) -> str:
     Use this to check what vulnerabilities are exposed on the target's web-facing services."""
     if not re.match(r"^[\w.\-/:]+$", target):
         raise ValueError(f"Invalid target format: {target!r}")
-    from nuclei_subgraph import run_pipeline as nuclei_run_pipeline
+    from scanners.nuclei.nuclei_subgraph import run_pipeline as nuclei_run_pipeline
     try:
         payload = nuclei_run_pipeline(target=target)
     except RuntimeError:
@@ -196,10 +196,10 @@ def audit_host() -> str:
     # Lynis has no Windows port; on Windows the equivalent host-hardening audit runs via
     # PowerShell (windows_audit_subgraph), emitting the same host_audit payload contract.
     if _is_windows():
-        from windows_audit_subgraph import run_pipeline as _run_pipeline
+        from scanners.windows.windows_audit_subgraph import run_pipeline as _run_pipeline
         tool_name = "windows audit (PowerShell)"
     else:
-        from lynis_subgraph import run_pipeline as _run_pipeline
+        from scanners.lynis.lynis_subgraph import run_pipeline as _run_pipeline
         tool_name = "lynis"
     try:
         payload = _run_pipeline()
@@ -226,7 +226,7 @@ def scan_malware() -> str:
     # On Windows we read Defender's own threat history instead of running ClamAV — every
     # Windows host already has Defender, and the query is instant (see windows_defender_parser).
     if _is_windows():
-        from windows_defender_parser import query_defender_malware
+        from scanners.windows.windows_defender_parser import query_defender_malware
         payload = query_defender_malware()
         if payload is None:
             return json.dumps({
@@ -234,7 +234,7 @@ def scan_malware() -> str:
                 "reason": "Windows Defender threat history not available on this host",
             })
         return json.dumps(payload)
-    from clamav_subgraph import run_pipeline as clamav_run_pipeline
+    from scanners.clamav.clamav_subgraph import run_pipeline as clamav_run_pipeline
     try:
         payload = clamav_run_pipeline()
     except RuntimeError as exc:
@@ -267,7 +267,7 @@ def get_last_malware_result() -> Any:
     (the ClamAV producer/consumer split exists only to avoid blocking on clamscan).
     """
     if _is_windows():
-        from windows_defender_parser import query_defender_malware
+        from scanners.windows.windows_defender_parser import query_defender_malware
         payload = query_defender_malware()
         if payload is None:
             return {
@@ -278,7 +278,7 @@ def get_last_malware_result() -> Any:
         payload["scan_age_hours"] = 0.0
         return payload
 
-    from clamav_parser import load_last_result
+    from scanners.clamav.clamav_parser import load_last_result
     result = load_last_result(_CLAMAV_MANIFEST_DB)
     if result is None:
         return {

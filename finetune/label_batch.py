@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import _validate_report_text, _validate_report_severities, _parse_report, build_findings_table, _CVE_RE, _CPE_RE
-from lynis_subgraph import LYNIS_TEST_CATALOG
+from scanners.lynis.lynis_subgraph import LYNIS_TEST_CATALOG
 
 
 def _clean_refs(refs, limit=2):

@@ -22,7 +22,7 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional
 
-from bin_resolver import resolve as _resolve_bin
+from ..bin_resolver import resolve as _resolve_bin
 
 # Default hard timeout (seconds) for the Defender query subprocess.
 DEFAULT_DEFENDER_TIMEOUT = 60

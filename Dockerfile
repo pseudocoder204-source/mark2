@@ -15,7 +15,7 @@ RUN apk add --no-cache bash python3 py3-pip curl unzip clamav
 # output, is expressly carved out by the NPSL ("Licensor does not purport to
 # control ... any software which does not require the rights granted herein").
 # So mark2 shells out to a host-provided Nmap and ships none of its own.
-# nmap_parser.py finds it via bin_resolver.resolve() → $NMAP_BINARY, then $PATH.
+# scanners/nmap/nmap_parser.py finds it via bin_resolver.resolve() → $NMAP_BINARY, then $PATH.
 #
 # For LOCAL use only, you may build an image with Nmap baked in:
 #     docker build --build-arg INSTALL_NMAP=true -t mark2 .
@@ -86,20 +86,10 @@ ENV DB_PATH=/vulnerability_cache.db
 ENV CLAMAV_MANIFEST_DB=/clamav_manifest.db
 
 COPY entrypoint.sh          /entrypoint.sh
-COPY nmap_parser.py         /nmap_parser.py
-COPY nmap_subgraph.py       /nmap_subgraph.py
-COPY trivy_parser.py        /trivy_parser.py
-COPY trivy_subgraph.py      /trivy_subgraph.py
-COPY nuclei_parser.py       /nuclei_parser.py
-COPY nuclei_subgraph.py     /nuclei_subgraph.py
-COPY lynis_parser.py        /lynis_parser.py
-COPY lynis_subgraph.py      /lynis_subgraph.py
-COPY clamav_parser.py       /clamav_parser.py
-COPY clamav_subgraph.py     /clamav_subgraph.py
-COPY tools.py               /tools.py
+COPY scanners/               /scanners/
+COPY core/                   /core/
 COPY agent.py               /agent.py
 COPY vulnerability_cache.db /vulnerability_cache.db
-COPY display_graph.py       /display_graph.py
 
 RUN chmod +x /entrypoint.sh
 

@@ -5,7 +5,7 @@ import os
 import sys
 from typing import List, Dict, Any, Optional
 
-from bin_resolver import resolve as _resolve_bin
+from ..bin_resolver import resolve as _resolve_bin
 
 # STAGE 1: AUTOMATED EXECUTION ENGINE
 

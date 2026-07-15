@@ -19,7 +19,7 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, TypedDict
 
-from scan_log_db import STATUS_RESOLVED, get_finding_state, get_observations, list_scans
+from .scan_log_db import STATUS_RESOLVED, get_finding_state, get_observations, list_scans
 
 # Mirrors agent._TIER_RANK. Duplicated rather than imported: agent.py will import this
 # module in Phase 6, so the reverse import would be circular.

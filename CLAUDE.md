@@ -18,9 +18,9 @@ python3 test_run.py
 python3 agent.py [--target IP] [--json]
 
 # Run individual subgraphs standalone (all require langgraph installed)
-python3 nmap_subgraph.py [target]
-python3 trivy_subgraph.py
-python3 nuclei_subgraph.py [target]
+python3 -m scanners.nmap.nmap_subgraph [target]
+python3 -m scanners.trivy.trivy_subgraph
+python3 -m scanners.nuclei.nuclei_subgraph [target]
 ```
 
 `test_run.py` is self-contained — all dependencies are Python stdlib. The `requirements.txt` lists the full set of dependencies including `langgraph`, `langchain-core`, `langchain-ollama`, `langchain-anthropic`, and `anthropic`.
@@ -60,10 +60,8 @@ docker run --rm -e TARGET=192.168.1.1 \
 # Run a standalone subgraph inside Docker (nuclei/trivy only live inside the image):
 docker run --rm --network host \
   --entrypoint /venv/bin/python3 \
-  -v $(pwd)/nuclei_subgraph.py:/nuclei_subgraph.py \
-  -v $(pwd)/nuclei_parser.py:/nuclei_parser.py \
-  -v $(pwd)/display_graph.py:/display_graph.py \
-  mark2 /nuclei_subgraph.py 192.168.56.3
+  -v $(pwd)/scanners:/scanners \
+  mark2 -m scanners.nuclei.nuclei_subgraph 192.168.56.3
 ```
 
 `TARGET` defaults to `127.0.0.1` if not set. The pre-populated `vulnerability_cache.db` is baked into the image so the first sync is incremental, not a full download.
@@ -96,7 +94,7 @@ Each scanner has a self-contained LangGraph subgraph. All four follow the same p
 - A `display_graph(app)` call that renders the graph to `graph.png`
 - A `__main__` entry point for standalone use
 
-#### `nmap_subgraph.py`
+#### `scanners/nmap/nmap_subgraph.py`
 
 Graph: `init_db → sync_db → scan → parse → enrich → END`
 
@@ -105,7 +103,7 @@ State outputs: `db_ready`, `raw_xml`, `findings`, `hosts`, `payload`, `error`
 
 Wraps the full nmap pipeline including DB initialisation and NVD sync. For `scan_type="host_discovery"`, `_parse_node` parses hosts (not ports) into `hosts`, and `_enrich_node` passes that list straight through to `payload` — there's nothing to CVE-enrich when there are no ports/CPEs. Every other scan type still runs the full CVE-enrichment path, and `script_output` (any NSE script results, e.g. `http-default-accounts` from `iot_default_creds`) rides along on each finding into the payload's `script_findings` field untouched by any LLM.
 
-#### `trivy_subgraph.py`
+#### `scanners/trivy/trivy_subgraph.py`
 
 Graph: `scan → build → END`
 
@@ -113,7 +111,7 @@ State outputs: `raw_results`, `payload`, `error`
 
 No inputs needed — Trivy always scans the local filesystem. Returns `{"status":"unavailable"}` gracefully if Trivy is not installed.
 
-#### `nuclei_subgraph.py`
+#### `scanners/nuclei/nuclei_subgraph.py`
 
 Graph: `scan → build → END`
 
@@ -122,7 +120,7 @@ State outputs: `raw_findings`, `payload`, `error`
 
 **Important:** `_scan_node` prepends `http://` to bare IP/hostname targets before calling `run_nuclei_scan`. This prevents nuclei's built-in httpx probe from attempting port 443 first — when 443 is closed or filtered, httpx marks the host as permanently unresponsive and skips all templates, producing zero findings even when port 80 is live.
 
-#### `lynis_subgraph.py`
+#### `scanners/lynis/lynis_subgraph.py`
 
 Graph: `scan → parse → enrich → build → END`
 
@@ -131,7 +129,7 @@ State outputs: `raw_report`, `parsed_report`, `payload`, `error`
 
 No target needed — Lynis always audits the local host. The extra `enrich` node is unique to this subgraph: it cross-references each `test_id` against the built-in `LYNIS_TEST_CATALOG` to fill in the human-readable description, remediation steps, and category tag that the machine-readable report file omits. That catalog is **original text written for this project**, not copied from Lynis (which is GPL-3.0, incompatible with this project's GPL-2.0-only). As of 2026-07-10 it was fully verified against upstream `include/tests_*` and now holds **63 entries**, down from 80: 17 IDs were removed because they can never reach `priority_findings` (15 only call `LogText`/`Display`/`AddHP`, never `ReportWarning`/`ReportSuggestion`; `LDAP-2240`/`LDAP-2244` have no `Register` call upstream at all). Since only `warning[]`/`suggestion[]` lines become findings, every `description` is phrased as **the condition detected**, not as what the test inspects — see the PROVENANCE comment above the catalog. Falls back to prefix-based category inference (e.g., `SSH-7408` → "SSH") for test IDs not in the catalog.
 
-#### `clamav_subgraph.py`
+#### `scanners/clamav/clamav_subgraph.py`
 
 Graph: `scan → parse → build → END`
 
@@ -146,19 +144,19 @@ Each subgraph delegates to a corresponding parser module:
 
 | Parser | Key functions |
 |---|---|
-| `nmap_parser.py` | `run_nmap`, `parse_nmap_xml`, `enrich_and_condense_findings`, `init_local_db`, `sync_local_db_with_nvd` |
-| `trivy_parser.py` | `run_local_trivy_scan`, `build_llm_payload_from_trivy` |
-| `nuclei_parser.py` | `run_nuclei_scan`, `build_llm_payload_from_nuclei` |
-| `lynis_parser.py` | `run_lynis_audit`, `parse_lynis_report`, `build_llm_payload_from_lynis` |
-| `clamav_parser.py` | `run_clamav_scan`, `parse_clamav_output`, `build_llm_payload_from_clamav` |
-| `windows_audit_parser.py` | `run_windows_audit`, `parse_windows_audit`, `build_llm_payload_from_windows_audit` (Windows-only, Lynis's counterpart) |
-| `windows_defender_parser.py` | `run_defender_query`, `parse_defender_output`, `build_llm_payload_from_defender`, `query_defender_malware` (Windows-only malware source) |
+| `scanners/nmap/nmap_parser.py` | `run_nmap`, `parse_nmap_xml`, `enrich_and_condense_findings`, `init_local_db`, `sync_local_db_with_nvd` |
+| `scanners/trivy/trivy_parser.py` | `run_local_trivy_scan`, `build_llm_payload_from_trivy` |
+| `scanners/nuclei/nuclei_parser.py` | `run_nuclei_scan`, `build_llm_payload_from_nuclei` |
+| `scanners/lynis/lynis_parser.py` | `run_lynis_audit`, `parse_lynis_report`, `build_llm_payload_from_lynis` |
+| `scanners/clamav/clamav_parser.py` | `run_clamav_scan`, `parse_clamav_output`, `build_llm_payload_from_clamav` |
+| `scanners/windows/windows_audit_parser.py` | `run_windows_audit`, `parse_windows_audit`, `build_llm_payload_from_windows_audit` (Windows-only, Lynis's counterpart) |
+| `scanners/windows/windows_defender_parser.py` | `run_defender_query`, `parse_defender_output`, `build_llm_payload_from_defender`, `query_defender_malware` (Windows-only malware source) |
 
-`nuclei_parser.py` uses `-u` and `-jsonl` flags (not `-target` / `-json` — those flags were removed in nuclei v3).
+`scanners/nuclei/nuclei_parser.py` uses `-u` and `-jsonl` flags (not `-target` / `-json` — those flags were removed in nuclei v3).
 
-#### `clamav_parser.py`
+#### `scanners/clamav/clamav_parser.py`
 
-Runs `clamscan` (no `clamd` daemon — a deliberate choice to avoid a persistent background process's memory/CPU cost) across a fixed set of high-risk directories (`_DEFAULT_SCAN_PATHS`: `/home`, `/tmp`, `/var/tmp`, `/opt`, `/srv`, `/root`, `/var/www`), then parses and condenses the results into an LLM-ready payload. Wired into `clamav_subgraph.py` and `tools.py` (`scan_malware`), and into `agent.py`'s deterministic worker spine as the `malware` stage — but read-decoupled from that spine, see below.
+Runs `clamscan` (no `clamd` daemon — a deliberate choice to avoid a persistent background process's memory/CPU cost) across a fixed set of high-risk directories (`_DEFAULT_SCAN_PATHS`: `/home`, `/tmp`, `/var/tmp`, `/opt`, `/srv`, `/root`, `/var/www`), then parses and condenses the results into an LLM-ready payload. Wired into `scanners/clamav/clamav_subgraph.py` and `core/tools.py` (`scan_malware`), and into `agent.py`'s deterministic worker spine as the `malware` stage — but read-decoupled from that spine, see below.
 
 **Full vs. incremental scanning:** a full ClamAV scan of a real home directory realistically takes **1–4+ hours** on a standard laptop (clamscan without the daemon reloads the ~200MB+ signature set on every invocation, then reads every file's content at roughly 5–15 MB/s single-threaded). That's a one-time cost users should expect on first run or "overnight," not something to run on every diagnostic pass. To make repeat runs practical:
 
@@ -187,7 +185,7 @@ systemd/mark2-clamav-scan.service  oneshot unit that runs the wrapper as root
 systemd/mark2-clamav-scan.timer    daily timer (±30min jitter) that triggers the service
 ```
 
-`mark2-clamav-scan.sh` runs a throwaway `docker run --entrypoint /venv/bin/python3 mark2 /clamav_subgraph.py`, bind-mounting:
+`mark2-clamav-scan.sh` runs a throwaway `docker run --entrypoint /venv/bin/python3 mark2 -m scanners.clamav.clamav_subgraph`, bind-mounting:
 - the same high-risk directories as `_DEFAULT_SCAN_PATHS` (`/home`, `/tmp`, `/var/tmp`, `/opt`, `/srv`, `/root`, `/var/www`), **read-only** — clamscan never needs write access, and the container's own filesystem is not what you want scanned (it's ephemeral and mostly just this image's files);
 - `/var/lib/clamav` **read-write**, so `freshclam`'s downloaded signatures persist across `--rm` runs instead of a ~200MB+ re-download every time;
 - a persistent host path (`$MARK2_STATE_DIR/clamav_manifest.db`, default `/var/lib/mark2/clamav_manifest.db`) onto `/clamav_manifest.db` — this is the file both the incremental-scan manifest and the last-result cache live in, and it must be the *same* file the main diagnostic container reads from (bind-mount it the same way with `-e CLAMAV_MANIFEST_DB=/clamav_manifest.db -v $MARK2_STATE_DIR/clamav_manifest.db:/clamav_manifest.db` wherever `agent.py` runs).
@@ -205,7 +203,7 @@ sudo systemctl start mark2-clamav-scan.service
 
 Runs as `User=root` in the service unit because reading bind-mounted `/root`, `/var/www`, etc. generally requires it — if your threat model doesn't need those paths, narrow `CLAMAV_SCAN_PATHS` and drop the root requirement.
 
-### Tool layer (`tools.py`)
+### Tool layer (`core/tools.py`)
 
 Wraps the subgraphs into `@tool`-decorated LangChain tools (`TOOLS` list) that `agent.py` binds directly to the LLM via `llm.bind_tools(TOOLS)`.
 
@@ -251,7 +249,7 @@ There is deliberately **no autonomous/free-form agent** — an earlier `agent2.p
 
 Produces a JSON report with `overall_risk`, `summary`, `findings[]`, and `good_news[]`, rendered as a human-readable terminal report unless `--json` is passed.
 
-### Graph visualisation (`display_graph.py`)
+### Graph visualisation (`scanners/display_graph.py`)
 
 Called by each subgraph's `run_pipeline()` to render the compiled LangGraph as `graph.png` in the working directory. Requires write permission to the current directory — the file is owned by whoever builds the Docker image, so run standalone subgraph commands from the project directory on the host rather than from inside a root-owned Docker container.
 
@@ -268,16 +266,16 @@ The pipeline runs natively per-OS via runtime `platform.system()` dispatch — *
 | Nuclei | Native Go binary, HTTP-only, no driver/admin. No logic change. |
 | nmap | Native binary. Localhost `-sV` works via Winsock with no admin; LAN discovery/SYN/OS-detection need **Npcap** installed and **Administrator** at runtime. |
 | Trivy | **Skipped on Windows** (`tools.scan_filesystem` returns `{"status":"skipped"}`) — its fs mode reads Linux package DBs (dpkg/rpm/apk) that don't exist on Windows. OS-patch state is covered by the host audit's Windows Update check instead. |
-| Lynis | No Windows port. Replaced by `windows_audit_parser.py` + `windows_audit_subgraph.py`. |
-| ClamAV | Not run on Windows (redundant with Defender, risks quarantine). Malware source is `windows_defender_parser.py`, reading Defender's own threat history. |
+| Lynis | No Windows port. Replaced by `scanners/windows/windows_audit_parser.py` + `scanners/windows/windows_audit_subgraph.py`. |
+| ClamAV | Not run on Windows (redundant with Defender, risks quarantine). Malware source is `scanners/windows/windows_defender_parser.py`, reading Defender's own threat history. |
 
 **New modules:**
 
-- **`bin_resolver.py`** — `resolve(tool)` finds each scanner binary via env override (`NMAP_BINARY`, `NUCLEI_BINARY`, `TRIVY_BINARY`, …) → bundled `MARK2_BIN_DIR`/`./bin` → `PATH`, so a packaged Windows build needn't be on `PATH`. Wired into `nmap_parser.py`, `nuclei_parser.py`, `trivy_parser.py`. Also exposes `is_elevated()` (admin/root check).
-- **`windows_audit_parser.py` / `windows_audit_subgraph.py`** — Lynis's Windows counterpart. Graph `scan → parse → build → END`. One batched PowerShell invocation (CIM cmdlets, not WMI) returns every check as JSON; `WINDOWS_AUDIT_CATALOG` supplies human text. Checks: Defender real-time protection, Firewall per profile, SMBv1, RDP + NLA, UAC, BitLocker, Windows Update auto-update + staleness, Guest account, PowerShell execution policy. **Elevation-gated checks** (Defender, SMBv1, BitLocker) that can't be read emit an explicit **`undetermined`** finding — never a silent "all good", which would poison the training set. Emits the same `priority_findings` `{test_id, severity, description, solution}` contract as Lynis (severities `HIGH`/`MEDIUM`).
-- **`windows_defender_parser.py`** — malware source on Windows. Queries `Get-MpThreatDetection`/`Get-MpThreat` and maps detections onto the ClamAV malware contract (`{file_path, signature, severity}`). Runs **live** on the spine (the ClamAV producer/consumer decoupling exists only because clamscan takes hours; the Defender query is instant), so `tools.get_last_malware_result()` queries it directly on Windows instead of reading the cache.
+- **`scanners/bin_resolver.py`** — `resolve(tool)` finds each scanner binary via env override (`NMAP_BINARY`, `NUCLEI_BINARY`, `TRIVY_BINARY`, …) → bundled `MARK2_BIN_DIR`/`./bin` → `PATH`, so a packaged Windows build needn't be on `PATH`. Wired into `scanners/nmap/nmap_parser.py`, `scanners/nuclei/nuclei_parser.py`, `scanners/trivy/trivy_parser.py`. Also exposes `is_elevated()` (admin/root check).
+- **`scanners/windows/windows_audit_parser.py` / `scanners/windows/windows_audit_subgraph.py`** — Lynis's Windows counterpart. Graph `scan → parse → build → END`. One batched PowerShell invocation (CIM cmdlets, not WMI) returns every check as JSON; `WINDOWS_AUDIT_CATALOG` supplies human text. Checks: Defender real-time protection, Firewall per profile, SMBv1, RDP + NLA, UAC, BitLocker, Windows Update auto-update + staleness, Guest account, PowerShell execution policy. **Elevation-gated checks** (Defender, SMBv1, BitLocker) that can't be read emit an explicit **`undetermined`** finding — never a silent "all good", which would poison the training set. Emits the same `priority_findings` `{test_id, severity, description, solution}` contract as Lynis (severities `HIGH`/`MEDIUM`).
+- **`scanners/windows/windows_defender_parser.py`** — malware source on Windows. Queries `Get-MpThreatDetection`/`Get-MpThreat` and maps detections onto the ClamAV malware contract (`{file_path, signature, severity}`). Runs **live** on the spine (the ClamAV producer/consumer decoupling exists only because clamscan takes hours; the Defender query is instant), so `tools.get_last_malware_result()` queries it directly on Windows instead of reading the cache.
 
-**`tools.py` dispatch seams** (`_is_windows()`): `audit_host()` imports the Windows audit subgraph, `scan_filesystem()` returns skipped, and both `scan_malware()` and `get_last_malware_result()` route to the Defender query. Everything downstream is unchanged.
+**`core/tools.py` dispatch seams** (`_is_windows()`): `audit_host()` imports the Windows audit subgraph, `scan_filesystem()` returns skipped, and both `scan_malware()` and `get_last_malware_result()` route to the Defender query. Everything downstream is unchanged.
 
 **Windows prerequisites, installed by the user:** nmap, Npcap (for nmap LAN scans), and Administrator rights (for elevation-gated audit checks and raw-socket nmap). **nmap and Npcap must not be bundled or auto-downloaded by mark2** — redistributing nmap triggers the NPSL's OEM terms, and Npcap may not be redistributed at all without separate written permission from Nmap Software LLC. The installer's job is to detect them and link to nmap.org / npcap.com, not to ship them. A signed package carrying nuclei.exe (MIT), trivy.exe (Apache-2.0), and the Python runtime is separate follow-on distribution work (see `GuideToWindowsCompatibility.txt`); code-signing is close to mandatory on Windows since unsigned pentest bundles trip SmartScreen and Defender quarantine.
 
@@ -294,14 +292,14 @@ The pipeline runs natively per-OS via runtime `platform.system()` dispatch — *
 | `ANTHROPIC_MODEL` | `claude-opus-4-8` | `agent.py` — `ChatAnthropic` |
 | `ANTHROPIC_API_KEY` | _(required for claude)_ | `agent.py` — `ChatAnthropic` |
 | `NVD_API_KEY` | _(none)_ | `test_run.py` NVD sync |
-| `DB_PATH` | `vulnerability_cache.db` | `tools.py`, `test_run.py` |
-| `NUCLEI_TEMPLATES` | _(none)_ | `nuclei_parser.py` — optional template path override |
-| `CLAMAV_SCAN_PATHS` | `_DEFAULT_SCAN_PATHS` | `clamav_parser.py` — comma-separated override of directories to scan |
-| `CLAMAV_SCAN_TIMEOUT` | `1800` (seconds) | `clamav_parser.py` — hard cap on the clamscan subprocess |
-| `CLAMAV_MANIFEST_DB` | `clamav_manifest.db` | `clamav_parser.py` — path to the incremental-scan manifest SQLite DB |
-| `CLAMAV_FORCE_FULL_SCAN` | _(unset)_ | `clamav_parser.py` — set to `1`/`true`/`yes` to force a full scan regardless of the manifest/interval |
-| `MARK2_BIN_DIR` | `./bin` (next to `bin_resolver.py`) | `bin_resolver.py` — dir holding bundled scanner binaries (nmap.exe, nuclei.exe, …) |
-| `NMAP_BINARY` / `NUCLEI_BINARY` / `TRIVY_BINARY` | _(none)_ | `bin_resolver.py` — explicit per-tool binary path override, wins over bundled dir/PATH |
+| `DB_PATH` | `vulnerability_cache.db` | `core/tools.py`, `test_run.py` |
+| `NUCLEI_TEMPLATES` | _(none)_ | `scanners/nuclei/nuclei_parser.py` — optional template path override |
+| `CLAMAV_SCAN_PATHS` | `_DEFAULT_SCAN_PATHS` | `scanners/clamav/clamav_parser.py` — comma-separated override of directories to scan |
+| `CLAMAV_SCAN_TIMEOUT` | `1800` (seconds) | `scanners/clamav/clamav_parser.py` — hard cap on the clamscan subprocess |
+| `CLAMAV_MANIFEST_DB` | `clamav_manifest.db` | `scanners/clamav/clamav_parser.py` — path to the incremental-scan manifest SQLite DB |
+| `CLAMAV_FORCE_FULL_SCAN` | _(unset)_ | `scanners/clamav/clamav_parser.py` — set to `1`/`true`/`yes` to force a full scan regardless of the manifest/interval |
+| `MARK2_BIN_DIR` | `./bin` (repo root) | `scanners/bin_resolver.py` — dir holding bundled scanner binaries (nmap.exe, nuclei.exe, …) |
+| `NMAP_BINARY` / `NUCLEI_BINARY` / `TRIVY_BINARY` | _(none)_ | `scanners/bin_resolver.py` — explicit per-tool binary path override, wins over bundled dir/PATH |
 
 ## Git Conventions
 
@@ -315,16 +313,16 @@ human authors. Likewise, do not add "Generated with Claude Code" or similar foot
 - `vulnerability_cache.db` is the local SQLite cache. Delete it to force a full re-sync from NVD.
 - `TARGET` and `NVD_API_KEY` are read from environment variables (`os.environ`). Never hardcode them.
 - Without an NVD API key, the NVD rate-limits to ~5 requests/30s; the code sleeps 6.5s between requests (1.5s with a key).
-- Nmap is **not** bundled by mark2 (NPSL redistribution — see README.md § Licensing and Attributions). It must be installed by the user and found on `$PATH` or via `$NMAP_BINARY`. A missing Nmap is not fatal: `run_nmap` raises `RuntimeError` (`nmap_parser.py`), which `tools.py` converts to `{"status": "unavailable"}` for the three Nmap-backed tools.
+- Nmap is **not** bundled by mark2 (NPSL redistribution — see README.md § Licensing and Attributions). It must be installed by the user and found on `$PATH` or via `$NMAP_BINARY`. A missing Nmap is not fatal: `run_nmap` raises `RuntimeError` (`scanners/nmap/nmap_parser.py`), which `core/tools.py` converts to `{"status": "unavailable"}` for the three Nmap-backed tools.
 - The `-sV` version detection scan requires nmap's NSE data files (the `nmap-scripts` package on Alpine, bundled with nmap on most other distros). Without them, nmap fails with `could not locate nse_main.lua`. `IOT_DEFAULT_CREDS`'s NSE script names (`http-default-accounts`, `upnp-info`, `snmp-info`) depend on the same data files.
 - `run_nmap` enforces a hard subprocess timeout (`DEFAULT_NMAP_TIMEOUT` = 300s) — a hung nmap process previously had no bound and could hang the whole pipeline. Pass `timeout=` to override per call.
 - `sync_local_db_with_nvd` is incremental: it records the last sync timestamp in `sync_metadata` and only fetches CVEs modified since then. On first run it pulls 30 days of history.
 - `enrich_and_condense_findings` never skips a finding even if no CVEs match — host inventory data (port, version, service) is always preserved in the output.
-- `scan_filesystem` in `tools.py` returns a graceful `{"status":"unavailable"}` JSON if Trivy is not installed, rather than crashing the agent loop.
+- `scan_filesystem` in `core/tools.py` returns a graceful `{"status":"unavailable"}` JSON if Trivy is not installed, rather than crashing the agent loop.
 - The agent loop in `agent.py` catches all tool execution exceptions and feeds them back to the model as `{"error": "…"}` JSON so the model can recover rather than crash.
 - Nuclei v3 uses `-jsonl` for JSON-lines output and `-u` to specify a target URL. The older `-json` and `-target` flags do not exist in v3 and are silently ignored, producing zero output.
 - Nuclei's httpx probe attempts port 443 before 80. If 443 is closed/filtered the host is marked permanently unresponsive and all templates are skipped. Always pass an explicit `http://` URL (not a bare IP) to force HTTP-only scanning.
-- `graph.png` is written to the working directory by `display_graph.py`. Inside Docker the file is owned by root — run subgraphs from the host with volume mounts to avoid permission errors.
-- `clamav_parser.py` never runs `clamd`/`clamdscan` — only `clamscan` per invocation — to avoid a persistent daemon's battery/compute overhead, at the cost of reloading the signature DB (~200MB+) on every run.
+- `graph.png` is written to the working directory by `scanners/display_graph.py`. Inside Docker the file is owned by root — run subgraphs from the host with volume mounts to avoid permission errors.
+- `scanners/clamav/clamav_parser.py` never runs `clamd`/`clamdscan` — only `clamscan` per invocation — to avoid a persistent daemon's battery/compute overhead, at the cost of reloading the signature DB (~200MB+) on every run.
 - A full ClamAV scan is expected monthly (`_FULL_SCAN_INTERVAL_DAYS` = 30) and can take **1–4+ hours** on a standard laptop the first time or whenever forced; incremental runs in between should complete in roughly the time it takes to reload the signature DB plus scan only changed files (typically well under a few minutes).
 - `clamav_manifest.db` tracks `(mtime, size, inode)` per file to decide what's "unchanged" for incremental scans — delete it to force the next run to rebuild state from scratch (it will still run as a full scan regardless, since a missing manifest also triggers `_should_run_full_scan`).

@@ -17,10 +17,10 @@ See the PROVENANCE note above LYNIS_TEST_CATALOG: it only carries test IDs that 
 Lynis can actually report on, and each description states the condition that was detected.
 
 Usage — standalone:
-    python3 lynis_subgraph.py
+    python3 -m scanners.lynis.lynis_subgraph
 
 Usage — as a subgraph node inside a parent graph:
-    from lynis_subgraph import build_lynis_subgraph
+    from scanners.lynis.lynis_subgraph import build_lynis_subgraph
     parent.add_node("lynis", build_lynis_subgraph())
 
     No inputs required — Lynis always audits the local host.
@@ -36,9 +36,9 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
+# from ..display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
-from lynis_parser import (
+from .lynis_parser import (
     build_llm_payload_from_lynis,
     parse_lynis_report,
     run_lynis_audit,

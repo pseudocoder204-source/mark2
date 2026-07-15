@@ -12,7 +12,7 @@ import time
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from bin_resolver import resolve as _resolve_bin
+from ..bin_resolver import resolve as _resolve_bin
 import re
 import threading
 

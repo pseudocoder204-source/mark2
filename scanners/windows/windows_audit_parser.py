@@ -31,7 +31,7 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional
 
-from bin_resolver import is_elevated, resolve as _resolve_bin
+from ..bin_resolver import is_elevated, resolve as _resolve_bin
 
 # Default hard timeout (seconds) for the PowerShell audit subprocess. Every worker must
 # fail bounded, not hang — same rationale as the other parsers' timeouts.

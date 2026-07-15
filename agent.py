@@ -96,12 +96,12 @@ from typing import Any, Dict, List, Optional, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
 
-# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
-import drift as drift_engine
-import exploit_intel
-import priority
-import tools
-from scan_log_db import (
+# from scanners.display_graph import display_graph  # testing-only visualization, not needed for the pipeline
+from core import drift as drift_engine
+from core import exploit_intel
+from core import priority
+from core import tools
+from core.scan_log_db import (
     STATUS_OPEN,
     STATUS_RESOLVED,
     forget_target,

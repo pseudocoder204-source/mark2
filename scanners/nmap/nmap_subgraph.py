@@ -13,10 +13,10 @@ instead of once per call:
                                        END            END             END   (on error)
 
 Usage — standalone:
-    python3 nmap_subgraph.py [target]
+    python3 -m scanners.nmap.nmap_subgraph [target]
 
 Usage — as a subgraph node inside a parent graph:
-    from nmap_subgraph import build_nmap_subgraph
+    from scanners.nmap.nmap_subgraph import build_nmap_subgraph
     parent.add_node("nmap", build_nmap_subgraph())
 
     The parent state must expose at least: target, scan_type, db_path, nvd_api_key.
@@ -39,9 +39,9 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
+# from ..display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
-from nmap_parser import (
+from .nmap_parser import (
     ScanType,
     ServiceFinding,
     HostFinding,

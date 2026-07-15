@@ -293,11 +293,11 @@ examples above.
 You can also run any single scanner's subgraph standalone:
 
 ```bash
-python3 nmap_subgraph.py [target]
-python3 nuclei_subgraph.py [target]
-python3 trivy_subgraph.py
-python3 lynis_subgraph.py
-python3 clamav_subgraph.py
+python3 -m scanners.nmap.nmap_subgraph [target]
+python3 -m scanners.nuclei.nuclei_subgraph [target]
+python3 -m scanners.trivy.trivy_subgraph
+python3 -m scanners.lynis.lynis_subgraph
+python3 -m scanners.clamav.clamav_subgraph
 ```
 
 ### The CVE cache

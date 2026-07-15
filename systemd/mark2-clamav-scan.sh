@@ -48,4 +48,4 @@ exec docker run --rm \
     -v /var/lib/clamav:/var/lib/clamav \
     -v "$STATE_DIR/clamav_manifest.db:/clamav_manifest.db" \
     -e CLAMAV_MANIFEST_DB=/clamav_manifest.db \
-    "$IMAGE" /clamav_subgraph.py
+    "$IMAGE" -m scanners.clamav.clamav_subgraph

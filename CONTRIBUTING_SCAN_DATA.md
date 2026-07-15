@@ -54,7 +54,7 @@ The local CVE cache (`vulnerability_cache.db`) is **too large to ship in the rep
 uncompressed), so it's hosted separately as a Release asset. Download
 `vulnerability_cache.db.gz` (~126 MB) from the project's
 [Releases page](https://github.com/pseudocoder204-source/mark2/releases) (tag `v0.1.0-data`)
-and move it into the **repo root** (i.e. next to `contribute_real_scan.py`) — it doesn't
+and move it into the **repo root** (i.e. next to `agent.py`) — it doesn't
 land there automatically, so make sure it's not still sitting in your Downloads folder.
 Then decompress it once — it lets the CVE lookup start from a full local cache instead of
 a slow first-time download from NVD:
@@ -107,8 +107,8 @@ winget install -e --id Insecure.Nmap
 This also installs Npcap, which nmap needs for LAN scans.
 
 *nuclei:* `winget` doesn't have a good nuclei package, so install it manually into a
-`bin` folder next to `bin_resolver.py` (the repo root) — `bin_resolver.py` checks that
-folder before falling back to `PATH`:
+`bin` folder at the repo root — `bin_resolver.py` checks that folder before falling
+back to `PATH`:
 ```powershell
 # 1. From the repo root, create the bin folder
 mkdir bin
@@ -133,8 +133,8 @@ Verify it landed in the right place:
 > The script runs a **preflight check** and prints which scanners it found. Missing ones
 > are skipped and simply won't appear in your contribution — so install them all for the
 > most useful data. Point the script at a binary that isn't on your `PATH` with an env var,
-> e.g. `NUCLEI_BINARY=C:\tools\nuclei.exe`, or drop binaries in a `bin` folder next to
-> `bin_resolver.py` (as above) — note it must be named `bin`, not `.bin`.
+> e.g. `NUCLEI_BINARY=C:\tools\nuclei.exe`, or drop binaries in a `bin` folder at the
+> repo root (as above) — note it must be named `bin`, not `.bin`.
 
 ---
 
@@ -143,7 +143,7 @@ Verify it landed in the right place:
 Scan **your own machine** (the default target `127.0.0.1`):
 
 ```bash
-python3 contribute_real_scan.py
+python3 -m scripts.contribute_real_scan
 ```
 
 > **Windows:** run this from the same elevated PowerShell window as before (`python` not

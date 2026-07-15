@@ -13,10 +13,10 @@ node): the catalog lookup happens inline in windows_audit_parser's build stage, 
 no external report format to re-parse.
 
 Usage — standalone:
-    python3 windows_audit_subgraph.py
+    python3 -m scanners.windows.windows_audit_subgraph
 
 Usage — as a subgraph node inside a parent graph:
-    from windows_audit_subgraph import build_windows_audit_subgraph
+    from scanners.windows.windows_audit_subgraph import build_windows_audit_subgraph
     parent.add_node("windows_audit", build_windows_audit_subgraph())
 
     No inputs required — the audit always inspects the local Windows host.
@@ -31,9 +31,9 @@ from typing import Any, Dict, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
+# from ..display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
-from windows_audit_parser import (
+from .windows_audit_parser import (
     build_llm_payload_from_windows_audit,
     parse_windows_audit,
     run_windows_audit,

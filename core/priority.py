@@ -14,14 +14,14 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
-from drift import (
+from .drift import (
     STATUS_IMPROVED,
     STATUS_NEW,
     STATUS_PERSISTING,
     STATUS_REAPPEARED,
     STATUS_WORSENED,
 )
-from exploit_intel import get_intel_for_cves
+from .exploit_intel import get_intel_for_cves
 
 # Tunable in one place, per DriftPlan.md Phase 5b, so weight changes are a one-line
 # diff and testable against a fixed fixture (Phase 8) rather than scattered magic

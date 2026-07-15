@@ -9,10 +9,10 @@ Both stages from trivy_parser.py are each modelled as a LangGraph node:
          END            END   (on error)
 
 Usage — standalone:
-    python3 trivy_subgraph.py
+    python3 -m scanners.trivy.trivy_subgraph
 
 Usage — as a subgraph node inside a parent graph:
-    from trivy_subgraph import build_trivy_subgraph
+    from scanners.trivy.trivy_subgraph import build_trivy_subgraph
     parent.add_node("trivy", build_trivy_subgraph())
 
     The parent state needs no special inputs for Trivy (it always scans the local fs).
@@ -27,9 +27,9 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
+# from ..display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
-from trivy_parser import (
+from .trivy_parser import (
     build_llm_payload_from_trivy,
     run_local_trivy_scan,
 )

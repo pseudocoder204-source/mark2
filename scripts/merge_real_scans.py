@@ -10,15 +10,15 @@ files into trainset.db as unlabeled 'real' rows (source='real', status='pending'
 skipping anything already present by content hash.
 
 Usage:
-    python3 merge_real_scans.py contrib_*.json
-    python3 merge_real_scans.py --db trainset.db contrib_alice_*.json contrib_bob_*.json
+    python3 -m scripts.merge_real_scans contrib_*.json
+    python3 -m scripts.merge_real_scans --db trainset.db contrib_alice_*.json contrib_bob_*.json
 """
 import argparse
 import json
 import sqlite3
 import sys
 
-import collect_inputs
+from scripts import collect_inputs
 
 _TRAINSET_SCHEMA = """
 CREATE TABLE IF NOT EXISTS examples (

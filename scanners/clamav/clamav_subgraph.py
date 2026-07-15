@@ -15,10 +15,10 @@ already carries everything (file path, signature name, inferred severity) needed
 for the payload; there's no external catalog to cross-reference.
 
 Usage — standalone:
-    python3 clamav_subgraph.py
+    python3 -m scanners.clamav.clamav_subgraph
 
 Usage — as a subgraph node inside a parent graph:
-    from clamav_subgraph import build_clamav_subgraph
+    from scanners.clamav.clamav_subgraph import build_clamav_subgraph
     parent.add_node("clamav", build_clamav_subgraph())
 
     No target input required — ClamAV always scans the local host's high-risk
@@ -35,9 +35,9 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
+# from ..display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
-from clamav_parser import (
+from .clamav_parser import (
     DEFAULT_SCAN_TIMEOUT,
     build_llm_payload_from_clamav,
     parse_clamav_output,

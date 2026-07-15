@@ -9,10 +9,10 @@ Both stages from nuclei_parser.py are each modelled as a LangGraph node:
          END            END   (on error)
 
 Usage — standalone:
-    python3 nuclei_subgraph.py [target]
+    python3 -m scanners.nuclei.nuclei_subgraph [target]
 
 Usage — as a subgraph node inside a parent graph:
-    from nuclei_subgraph import build_nuclei_subgraph
+    from scanners.nuclei.nuclei_subgraph import build_nuclei_subgraph
     parent.add_node("nuclei", build_nuclei_subgraph())
 
     The parent state must expose at least: target.
@@ -35,9 +35,9 @@ from typing import Any, Dict, List, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
-# from display_graph import display_graph  # testing-only visualization, not needed for the pipeline
+# from ..display_graph import display_graph  # testing-only visualization, not needed for the pipeline
 
-from nuclei_parser import (
+from .nuclei_parser import (
     build_llm_payload_from_nuclei,
     run_nuclei_scan,
 )

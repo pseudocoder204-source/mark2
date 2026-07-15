@@ -31,9 +31,9 @@ fixed versions, and (if --malware live) malware signature names and file
 paths under the scanned directories. Nothing else leaves your machine.
 
 Usage:
-    python3 contribute_real_scan.py
-    python3 contribute_real_scan.py --malware live --label my-laptop
-    python3 contribute_real_scan.py --yes   # skip the interactive prompt (CI/scripted use)
+    python3 -m scripts.contribute_real_scan
+    python3 -m scripts.contribute_real_scan --malware live --label my-laptop
+    python3 -m scripts.contribute_real_scan --yes   # skip the interactive prompt (CI/scripted use)
 
 Scanning anything other than your own machine requires the owner's explicit
 permission and the --i-have-permission flag.
@@ -48,8 +48,8 @@ import sqlite3
 import sys
 import time
 
-import collect_inputs
-from bin_resolver import resolve as _resolve_bin
+from scripts import collect_inputs
+from scanners.bin_resolver import resolve as _resolve_bin
 
 _TRAINSET_SCHEMA = """
 CREATE TABLE IF NOT EXISTS examples (
